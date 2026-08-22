@@ -1,0 +1,24 @@
+# ------------------------------------------------------------------
+# In dein bestehendes Caddyfile einfuegen, im Abschnitt "HOSTS"
+# (gleiche Struktur wie deine anderen Hosts, z.B. bookstack.hasikun.cc):
+# ------------------------------------------------------------------
+
+desks.hasikun.cc {
+	handle /.well-known/acme-challenge/* {
+		root * /srv/security
+		file_server
+	}
+	handle {
+		import block_common
+		import headers_common
+
+		reverse_proxy deskbooking-frontend:3000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/desks-access.log
+		format json
+	}
+}

@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Farbtokens. Das Produkt ist dunkel gedacht ("clean black");
+   der helle Modus ist die Ausnahme, nicht die Basis.
+   Werte als RGB-Tripel, damit Tailwind /50-Opacity anwenden kann.
+   ============================================================ */
+:root {
+  --c-canvas: 250 250 250;
+  --c-surface: 255 255 255;
+  --c-raised: 244 244 245;
+  --c-ink: 24 24 27;
+  --c-muted: 113 113 122;
+  --c-line: 228 228 231;
+  --c-free: 22 163 74;
+  --c-occupied: 161 161 170;
+  --c-danger: 220 38 38;
+
+  --accent: #a3e635;
+  /* Verlaufsfarben sind bewusst eigenstaendig - nicht vom Akzent abgeleitet */
+  --grad-from: #1e5799;
+  --grad-mid: #f300ff;
+  --grad-to: #e0ff00;
+  /* Farbe des Hintergrundscheins, ebenfalls separat einstellbar */
+  --ambient: #34d399;
+  --accent-ink: #0a0a0a;
+  --glow: 0 0 0;
+}
+
+.dark {
+  /* Neutrale Schwarztöne statt blaustichigem Grau */
+  --c-canvas: 10 10 10;
+  --c-surface: 18 18 18;
+  --c-raised: 32 32 34;
+  --c-ink: 244 244 245;
+  --c-muted: 138 138 145;
+  --c-line: 38 38 40;
+  --c-free: 132 204 22;
+  --c-occupied: 82 82 88;
+  --c-danger: 248 113 113;
+
+  --accent-ink: #0a0a0a;
+  --glow: 255 255 255;
+}
+
+html, body {
+  @apply bg-canvas text-ink;
+}
+
+.dark body {
+  /* Sehr dezenter Lichtschein von oben - gibt Tiefe, ohne aufzufallen.
+     Farbe kommt aus --ambient und ist unabhaengig von Akzent und Verlauf. */
+  background-image:
+    radial-gradient(120% 55% at 50% -10%, color-mix(in srgb, var(--ambient) 14%, transparent), transparent 70%),
+    radial-gradient(120% 60% at 50% -10%, rgb(255 255 255 / 0.025), transparent 70%);
+  background-attachment: fixed;
+}
+
+html.theme-transition, html.theme-transition * {
+  transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease;
+}
+
+/* ---------- Fokus: nur bei Tastaturbedienung ---------- */
+:focus-visible {
+  @apply outline-none ring-1;
+  --tw-ring-color: rgb(var(--c-muted) / 0.55);
+}
+.focus-ring { @apply outline-none; }
+.focus-ring:focus-visible {
+  @apply ring-1;
+  --tw-ring-color: rgb(var(--c-muted) / 0.55);
+}
+/* Eingabefelder: nur ein dezent hellerer Rahmen statt farbigem Ring */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  @apply ring-0;
+  border-color: rgb(var(--c-muted) / 0.45);
+  box-shadow: none;
+}
+
+/* ---------- Verlauf nach Gamesense-Prinzip ----------
+   renderer.gradient(x, y, w, h, r1,g1,b1,a1, r2,g2,b2,a2, horizontal)
+   entspricht hier: linear-gradient(90deg, Farbe1, Farbe2).
+   Bewusst OHNE Glow - der Verlauf trägt sich selbst.               */
+.gradient-accent {
+  background-image: linear-gradient(to right, var(--grad-from) 0%, var(--grad-mid) 50%, var(--grad-to) 100%);
+}
+.gradient-text {
+  background-image: linear-gradient(to right, var(--grad-from) 0%, var(--grad-mid) 50%, var(--grad-to) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* Feiner Verlaufsbalken - wie die 3px-Leiste aus der Vorlage */
+.gradient-bar {
+  height: 3px;
+  background-image: linear-gradient(to right, var(--grad-from) 0%, var(--grad-mid) 50%, var(--grad-to) 100%);
+}
+
+/* ---------- Dezenter Weiß-Glow ----------
+   Nur für Überschriften/Kennzahlen, bewusst schwach dosiert.        */
+.dark .glow-text {
+  text-shadow: 0 0 18px rgb(var(--glow) / 0.18), 0 0 42px rgb(var(--glow) / 0.06);
+}
+.dark .glow-soft {
+  box-shadow: 0 0 0 1px rgb(var(--glow) / 0.04), 0 8px 30px -12px rgb(var(--glow) / 0.10);
+}
+
+/* Der weiche Farbschein hinter Karten (wie in der Vorlage) */
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(48px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--c-line) / 0.5) 25%,
+    rgb(var(--c-line) / 0.85) 37%,
+    rgb(var(--c-line) / 0.5) 63%
+  );
+  background-size: 200% 100%;
+  @apply animate-shimmer;
+}
+
+.thin-scroll::-webkit-scrollbar { height: 9px; width: 9px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-line));
+  border-radius: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-muted) / 0.5); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
