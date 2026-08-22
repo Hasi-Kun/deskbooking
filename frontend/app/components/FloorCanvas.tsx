@@ -16,9 +16,9 @@ type ViewProps = {
   floor: Floor;
   desks: Desk[];
   objects: SceneObject[];
-  bookingByDesk: Map<string, Booking>;
+  bookingByDesk: Map<string, Booking[]>;
   currentUserId: string;
-  onDeskClick: (desk: Desk, booking: Booking | undefined, rect: DOMRect) => void;
+  onDeskClick: (desk: Desk, bookings: Booking[], rect: DOMRect) => void;
 };
 
 type BuilderProps = {
@@ -28,7 +28,9 @@ type BuilderProps = {
   objects: SceneObject[];
   selection: Selection;
   wallMode: boolean;
-  onSelect: (sel: Selection, rect?: DOMRect) => void;
+  onSelect: (sel: Selection) => void;
+  /** Rechtsklick auf ein Element: öffnet die Eigenschaften an der Mausposition. */
+  onContext: (sel: Selection, at: { x: number; y: number }) => void;
   onMoveDesk: (id: string, x: number, y: number) => void;
   onMoveObject: (id: string, x: number, y: number) => void;
   onMoveWall: (id: string, x1: number, y1: number, x2: number, y2: number) => void;
@@ -112,6 +114,11 @@ export default function FloorCanvas(props: Props) {
 
   function beginDrag(e: React.PointerEvent, state: NonNullable<DragState>) {
     if (!builder || builder.wallMode) return;
+    // Nur der primäre Zeigerknopf (Linksklick/Touch) startet ein Ziehen.
+    // Ohne diese Prüfung fängt setPointerCapture() auch den Rechtsklick ab,
+    // BEVOR das contextmenu-Ereignis den Browser erreicht - das Kontextmenü
+    // ging dadurch nie auf.
+    if (e.button !== 0) return;
     e.stopPropagation();
     setDrag(state);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
@@ -231,6 +238,12 @@ export default function FloorCanvas(props: Props) {
           onDragOver={(e) => { if (builder) { e.preventDefault(); setIsOver(true); } }}
           onDragLeave={() => setIsOver(false)}
           onDrop={handleDrop}
+          // Rechtsklick auf die leere Fläche (nicht auf ein Element) soll nie
+          // das Browser-eigene Kontextmenü zeigen - weder im Editor noch in
+          // der reinen Ansicht. Elemente mit einem eigenen Kontextmenü rufen
+          // preventDefault() bereits selbst auf; das hier ist die Absicherung
+          // für die Fläche darunter/dazwischen.
+          onContextMenu={(e) => e.preventDefault()}
           style={{
             position: "absolute",
             top: 0, left: 0,
@@ -309,7 +322,7 @@ export default function FloorCanvas(props: Props) {
                     // Zeichenmodus eine neue Wand und die Auswahl geht verloren.
                     e.stopPropagation();
                     const p = localPoint(e);
-                    builder.onSelect({ type: "object", id: w.id }, (e.currentTarget as HTMLElement).getBoundingClientRect());
+                    builder.onSelect({ type: "object", id: w.id });
                     // Ziehen nur ausserhalb des Zeichenmodus - im Zeichenmodus
                     // soll ein Klick die Wand lediglich auswaehlen.
                     if (!builder.wallMode) {
@@ -320,7 +333,12 @@ export default function FloorCanvas(props: Props) {
                       });
                     }
                   }}
-                  title={w.kind === "window" ? "Fenster – ziehen zum Verschieben" : "Wand – ziehen zum Verschieben"}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    builder.onSelect({ type: "object", id: w.id });
+                    builder.onContext({ type: "object", id: w.id }, { x: e.clientX, y: e.clientY });
+                  }}
+                  title={w.kind === "window" ? "Fenster – ziehen zum Verschieben, Rechtsklick für Eigenschaften" : "Wand – ziehen zum Verschieben, Rechtsklick für Eigenschaften"}
                   style={{
                     position: "absolute",
                     left: w.pos_x, top: w.pos_y,
@@ -356,7 +374,7 @@ export default function FloorCanvas(props: Props) {
                 onPointerDown={(e) => {
                   if (!builder) return;
                   const p = localPoint(e);
-                  builder.onSelect({ type: "object", id: o.id }, (e.currentTarget as HTMLElement).getBoundingClientRect());
+                  builder.onSelect({ type: "object", id: o.id });
                   beginDrag(e, { kind: "object", id: o.id, dx: p.x - o.pos_x, dy: p.y - o.pos_y });
                 }}
                 className={[
@@ -368,6 +386,12 @@ export default function FloorCanvas(props: Props) {
                 style={{
                   left: o.pos_x, top: o.pos_y, width: o.width, height: o.height,
                   transform: `translate(-50%, -50%) rotate(${o.rotation}deg)`,
+                }}
+                onContextMenu={(e) => {
+                  if (!builder) return;
+                  e.preventDefault();
+                  builder.onSelect({ type: "object", id: o.id });
+                  builder.onContext({ type: "object", id: o.id }, { x: e.clientX, y: e.clientY });
                 }}
                 title={o.label || undefined}
               >
@@ -391,12 +415,32 @@ export default function FloorCanvas(props: Props) {
             let booking: Booking | undefined;
 
             if (props.mode === "view") {
-              booking = props.bookingByDesk.get(desk.id);
+              const list = props.bookingByDesk.get(desk.id) ?? [];
+              const fullyBooked = list.some((b) => b.slot === "full") || list.length >= 2;
+              // Die eigene Buchung hat Vorrang in der Anzeige.
+              booking = list.find((b) => b.user_id === props.currentUserId) ?? list[0];
+              if (desk.capacity > 1) sub = `${desk.capacity} Plätze frei`;
               if (!desk.is_active) { state = "inactive"; sub = "Nicht verfügbar"; }
               else if (desk.fixed_user_id) { state = "fixed"; sub = desk.fixed_user_name || "Fest vergeben"; }
               else if (booking) {
                 state = booking.user_id === props.currentUserId ? "mine" : "occupied";
-                sub = state === "mine" ? "Dein Platz" : booking.user_name;
+                const half = list.filter((b) => b.slot !== "full");
+                if (state === "mine") {
+                  sub = "Dein Platz";
+                } else if (half.length === 2) {
+                  // Vor- und Nachmittag getrennt vergeben
+                  sub = "Vor-/Nachmittag belegt";
+                } else if (booking.slot === "morning") {
+                  sub = "Vormittags belegt";
+                } else if (booking.slot === "afternoon") {
+                  sub = "Nachmittags belegt";
+                } else {
+                  // Wer genau dort sitzt, steht erst im aufgeklappten Buchungs-
+                  // Panel - im Grundriss reicht das Avatar zur Wiedererkennung.
+                  // Bei Konferenztischen zusätzlich die Gruppengröße andeuten.
+                  const extra = booking.attendees?.length ?? 0;
+                  sub = extra > 0 ? `Belegt · +${extra}` : "Belegt";
+                }
               }
             } else {
               if (!desk.is_active) { state = "inactive"; sub = "Inaktiv"; }
@@ -406,6 +450,12 @@ export default function FloorCanvas(props: Props) {
 
             const selected = builder?.selection?.type === "desk" && builder.selection.id === desk.id;
             const clickable = props.mode === "view" && state !== "inactive";
+            // Konferenztische (Kapazität > 1) bekommen eine größere Kachel,
+            // damit sie sich im Grundriss optisch von Einzelplätzen abheben
+            // und sich mehrere Namen/die Personenzahl lesbar unterbringen lassen.
+            const isMeeting = desk.capacity > 1;
+            const tileW = isMeeting ? 150 : TILE_W;
+            const tileH = isMeeting ? 84 : TILE_H;
 
             return (
               <div
@@ -416,33 +466,60 @@ export default function FloorCanvas(props: Props) {
                 onPointerDown={(e) => {
                   if (!builder) return;
                   const p = localPoint(e);
-                  builder.onSelect({ type: "desk", id: desk.id }, (e.currentTarget as HTMLElement).getBoundingClientRect());
+                  builder.onSelect({ type: "desk", id: desk.id });
                   beginDrag(e, { kind: "desk", id: desk.id, dx: p.x - desk.pos_x, dy: p.y - desk.pos_y });
                 }}
                 onClick={(e) => {
                   if (props.mode === "view" && clickable) {
-                    props.onDeskClick(desk, booking, (e.currentTarget as HTMLElement).getBoundingClientRect());
+                    props.onDeskClick(desk, props.bookingByDesk.get(desk.id) ?? [], (e.currentTarget as HTMLElement).getBoundingClientRect());
                   }
+                }}
+                onContextMenu={(e) => {
+                  if (!builder) return;
+                  e.preventDefault();
+                  builder.onSelect({ type: "desk", id: desk.id });
+                  builder.onContext({ type: "desk", id: desk.id }, { x: e.clientX, y: e.clientY });
                 }}
                 onKeyDown={(e) => {
                   if (props.mode === "view" && clickable && (e.key === "Enter" || e.key === " ")) {
                     e.preventDefault();
-                    props.onDeskClick(desk, booking, (e.currentTarget as HTMLElement).getBoundingClientRect());
+                    props.onDeskClick(desk, props.bookingByDesk.get(desk.id) ?? [], (e.currentTarget as HTMLElement).getBoundingClientRect());
                   }
                 }}
                 className={[
                   "absolute transition-transform duration-200 focus-ring rounded-xl",
                   builder ? "cursor-grab active:cursor-grabbing" : "",
                   clickable ? "cursor-pointer hover:-translate-y-0.5" : "",
-                  selected ? "ring-2 ring-accent/50" : "",
+                  selected ? "ring-2 ring-accent/60" : "",
                 ].filter(Boolean).join(" ")}
                 style={{
                   left: desk.pos_x, top: desk.pos_y,
-                  width: TILE_W, height: TILE_H,
+                  width: tileW, height: tileH,
                   transform: "translate(-50%, -50%)",
                 }}
               >
-                <DeskTile name={desk.name} sub={sub} state={state} comment={booking?.comment || undefined} />
+                <DeskTile
+                  name={desk.name}
+                  sub={sub}
+                  state={state}
+                  capacity={isMeeting ? desk.capacity : undefined}
+                  comment={booking?.comment || undefined}
+                  person={
+                    state === "occupied" ? booking?.user_name
+                    : state === "fixed" ? desk.fixed_user_name ?? undefined
+                    : undefined
+                  }
+                  personStyle={
+                    state === "occupied" ? booking?.user_name_style
+                    : state === "fixed" ? desk.fixed_user_style
+                    : undefined
+                  }
+                  personStyleColor={
+                    state === "occupied" ? booking?.user_name_style_color
+                    : state === "fixed" ? desk.fixed_user_style_color
+                    : undefined
+                  }
+                />
               </div>
             );
           })}

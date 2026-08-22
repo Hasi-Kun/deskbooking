@@ -1,4 +1,6 @@
 "use client";
+import Avatar from "./ui/Avatar";
+import StyledName from "./StyledName";
 
 export type DeskState = "free" | "mine" | "occupied" | "fixed" | "inactive";
 
@@ -9,8 +11,15 @@ export type DeskState = "free" | "mine" | "occupied" | "fixed" | "inactive";
  * bleiben neutral und ruhig.
  */
 export default function DeskTile({
-  name, sub, state, comment,
-}: { name: string; sub: string; state: DeskState; comment?: string }) {
+  name, sub, state, comment, person, personStyle, personStyleColor, capacity,
+}: {
+  name: string; sub: string; state: DeskState; comment?: string; person?: string;
+  personStyle?: string; personStyleColor?: string;
+  /** Nur bei Konferenztischen (Kapazität > 1) gesetzt - zeigt ein kleines
+   *  Personen-Badge, damit sich Gruppentische im Grundriss auf einen Blick
+   *  von Einzelplätzen unterscheiden lassen. */
+  capacity?: number;
+}) {
   const isFree = state === "free";
   const isMine = state === "mine";
 
@@ -22,7 +31,7 @@ export default function DeskTile({
         isFree ? "border-free/35 bg-free/[0.06] hover:border-free/60 hover:bg-free/[0.10]" : "",
         isMine ? "border-transparent" : "",
         state === "occupied" ? "border-occupied/40 bg-occupied/[0.14]" : "",
-        state === "fixed" ? "border-dashed border-line bg-raised" : "",
+        state === "fixed" ? "border-dashed border-accent/45 bg-accent/[0.07]" : "",
         state === "inactive" ? "border-line bg-raised opacity-40" : "",
       ].filter(Boolean).join(" ")}
       style={isMine ? { background: "var(--accent)" } : undefined}
@@ -46,25 +55,62 @@ export default function DeskTile({
       )}
 
       <div className="pointer-events-none relative z-10 flex items-center justify-between gap-1">
-        <span
-          className={[
-            "font-mono text-[13px] font-bold leading-none tracking-tight",
-            isMine ? "text-accent-ink" : "text-ink",
-            isFree ? "text-free" : "",
-          ].join(" ")}
-        >
-          {name}
+        <span className="flex min-w-0 items-center gap-1">
+          <span
+            className={[
+              "text-[13px] font-bold leading-none tracking-tight tabular-nums truncate",
+              isMine ? "text-accent-ink" : "text-ink",
+              isFree ? "text-free" : "",
+            ].join(" ")}
+          >
+            {name}
+          </span>
+          {/* Konferenztisch-Kennzeichen: eigenes Icon statt nur Textzusatz,
+              damit die Gruppenkapazität auch bei kleiner Kachelgröße noch
+              auf einen Blick erkennbar ist. */}
+          {!!capacity && capacity > 1 && (
+            <span
+              className={[
+                "flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[9px] font-semibold tabular-nums",
+                isMine ? "text-accent-ink/85" : "text-muted",
+              ].join(" ")}
+              style={!isMine ? { background: "color-mix(in srgb, var(--accent) 12%, transparent)" } : undefined}
+              title={`Konferenztisch · ${capacity} Plätze`}
+            >
+              <GroupIcon />
+              {capacity}
+            </span>
+          )}
         </span>
-        <StateDot state={state} />
+        {state === "fixed" ? (
+          <span className="rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide
+                           text-accent" style={{ background: "color-mix(in srgb, var(--accent) 16%, transparent)" }}>
+            fest
+          </span>
+        ) : (
+          <StateDot state={state} />
+        )}
       </div>
 
       <span
         className={[
-          "pointer-events-none relative z-10 mt-1 truncate text-[10px] leading-tight",
-          isMine ? "text-accent-ink/80" : "text-muted",
+          "pointer-events-none relative z-10 mt-1 flex items-center gap-1.5 text-[10px] leading-tight",
+          isMine ? "text-accent-ink/85" : "text-muted",
         ].join(" ")}
       >
-        {sub}
+        {person && (
+          <Avatar name={person} size={16} badge="none" />
+        )}
+        {/* Steckt der Name im Zusatztext (z.B. "Anna · vorm."), wird nur er
+            eingefärbt/glitzert - der Rest bleibt schlichter Fließtext. */}
+        {person && sub.startsWith(person) ? (
+          <span className="truncate">
+            <StyledName name={person} style={personStyle} color={personStyleColor} />
+            {sub.slice(person.length)}
+          </span>
+        ) : (
+          <span className="truncate">{sub}</span>
+        )}
       </span>
 
       {comment && (
@@ -97,4 +143,16 @@ function StateDot({ state }: { state: DeskState }) {
   }
   if (state === "occupied") return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-occupied" />;
   return <span className="h-1.5 w-1.5 shrink-0 rounded-full border border-muted/50" />;
+}
+
+function GroupIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6" />
+      <path d="M16.5 8.5a3 3 0 1 0 0-5.9" />
+      <path d="M20 20c0-2.9-1.9-5.2-4.5-5.9" />
+    </svg>
+  );
 }

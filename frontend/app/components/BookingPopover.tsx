@@ -1,20 +1,28 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Desk, Booking } from "@/lib/api";
+import { useCallback } from "react";
+import { api, Desk, Booking, BookingSlot } from "@/lib/api";
 import AnchoredPopover from "./ui/AnchoredPopover";
 import { GlowCard, CardHeader, CardBody, CardFooter } from "./ui/GlowCard";
 import Button from "./ui/Button";
 import Checkbox from "./ui/Checkbox";
+import Avatar, { AvatarGroup } from "./ui/Avatar";
+import StyledName from "./StyledName";
 import { formatLong, toISO, fromISO } from "./ui/DatePicker";
 
 type Props = {
   anchor: DOMRect | null;
   desk: Desk | null;
-  booking: Booking | null;
+  bookings: Booking[];
   date: string;
-  canManage: boolean;
+  currentUserId: string;
   onClose: () => void;
-  onBook: (args: { comment: string; range?: { from: string; to: string; skipWeekends: boolean } }) => Promise<void>;
+  onBook: (args: {
+    comment: string;
+    slot: BookingSlot;
+    attendeeIds: string[];
+    range?: { from: string; to: string; skipWeekends: boolean };
+  }) => Promise<void>;
   onCancel: (booking: Booking) => Promise<void>;
 };
 
@@ -24,9 +32,21 @@ const addDays = (iso: string, n: number) => {
   return toISO(d);
 };
 
+const SLOT_LABEL: Record<BookingSlot, string> = {
+  full: "Ganztags",
+  morning: "Vormittag",
+  afternoon: "Nachmittag",
+};
+
 export default function BookingPopover({
-  anchor, desk, booking, date, canManage, onClose, onBook, onCancel,
+  anchor, desk, bookings, date, currentUserId, onClose, onBook, onCancel,
 }: Props) {
+  // Welche Zeitfenster sind an diesem Platz schon vergeben?
+  const takenFull = bookings.some((b) => b.slot === "full");
+  const takenMorning = takenFull || bookings.some((b) => b.slot === "morning");
+  const takenAfternoon = takenFull || bookings.some((b) => b.slot === "afternoon");
+  const ownBooking = bookings.find((b) => b.user_id === currentUserId) ?? null;
+  const canBookAnything = !(takenMorning && takenAfternoon);
   const [comment, setComment] = useState("");
   const [multiDay, setMultiDay] = useState(false);
   const [range, setRange] = useState({ from: date, to: addDays(date, 4) });
@@ -34,17 +54,41 @@ export default function BookingPopover({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Nur fuer Konferenztische (Kapazitaet > 1) relevant: zusaetzliche Teilnehmer
+  const isMeetingTable = (desk?.capacity ?? 1) > 1;
+  const [attendeeIds, setAttendeeIds] = useState<string[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [directory, setDirectory] = useState<{ id: string; full_name: string }[]>([]);
+  const [directoryLoaded, setDirectoryLoaded] = useState(false);
+
+  const loadDirectory = useCallback(() => {
+    if (directoryLoaded) return;
+    api<{ id: string; full_name: string }[]>("/api/chat/directory")
+      .then((rows) => { setDirectory(rows); setDirectoryLoaded(true); })
+      .catch(() => {});
+  }, [directoryLoaded]);
+
   useEffect(() => {
     setComment("");
     setMultiDay(false);
     setRange({ from: date, to: addDays(date, 4) });
     setError(null);
+    setAttendeeIds([]);
+    setShowPicker(false);
   }, [desk?.id, date]);
+
+  const [slot, setSlot] = useState<BookingSlot>("full");
+
+  useEffect(() => {
+    // Sinnvolle Vorauswahl: ist ein Halbtag weg, den anderen vorschlagen.
+    if (takenFull) return;
+    if (takenMorning && !takenAfternoon) setSlot("afternoon");
+    else if (takenAfternoon && !takenMorning) setSlot("morning");
+    else setSlot("full");
+  }, [takenFull, takenMorning, takenAfternoon, desk?.id, date]);
 
   if (!desk || !anchor) return null;
 
-  const isOwn = !!booking && canManage;
-  const isForeign = !!booking && !canManage;
   const isFixed = !!desk.fixed_user_id;
 
   async function run(fn: () => Promise<void>) {
@@ -60,8 +104,14 @@ export default function BookingPopover({
     }
   }
 
+  const slotOptions: { value: BookingSlot; disabled: boolean }[] = [
+    { value: "full", disabled: takenMorning || takenAfternoon },
+    { value: "morning", disabled: takenMorning },
+    { value: "afternoon", disabled: takenAfternoon },
+  ];
+
   return (
-    <AnchoredPopover anchor={anchor} onClose={onClose} width={300}>
+    <AnchoredPopover anchor={anchor} onClose={onClose} width={304}>
       <GlowCard>
         <CardHeader
           icon={<DeskGlyph />}
@@ -77,47 +127,148 @@ export default function BookingPopover({
 
         <CardBody className="space-y-3.5">
           {isFixed && (
-            <p className="text-sm text-muted">
-              Dieser Platz ist fest an <span className="text-ink">{desk.fixed_user_name}</span> vergeben
-              und kann nicht gebucht werden.
-            </p>
+            <div className="flex items-center gap-2.5">
+              <Avatar name={desk.fixed_user_name || "?"} size={34} badge="fixed" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  <StyledName name={desk.fixed_user_name || ""}
+                              style={desk.fixed_user_style} color={desk.fixed_user_style_color} />
+                </p>
+                <p className="text-xs text-muted">Fest zugewiesen · nicht buchbar</p>
+              </div>
+            </div>
           )}
 
-          {isForeign && (
-            <>
-              <div className="flex items-center gap-2.5">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-raised
-                                 text-[11px] font-semibold text-muted">
-                  {booking!.user_name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{booking!.user_name}</p>
-                  <p className="text-xs text-muted">belegt diesen Platz</p>
+          {/* Wer sitzt hier schon? */}
+          {!isFixed && bookings.length > 0 && (
+            <div className="space-y-2">
+              {bookings.map((b) => (
+                <div key={b.id} className="flex items-center gap-2.5">
+                  <Avatar
+                    name={b.user_name}
+                    size={34}
+                    badge={b.user_id === currentUserId ? "free" : "busy"}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {b.user_id === currentUserId
+                        ? "Du"
+                        : <StyledName name={b.user_name} style={b.user_name_style} color={b.user_name_style_color} />}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {SLOT_LABEL[b.slot]}
+                      {b.attendees.length > 0 && ` · +${b.attendees.length} ${b.attendees.length === 1 ? "Person" : "Personen"}`}
+                    </p>
+                  </div>
+                  {b.attendees.length > 0 && (
+                    <AvatarGroup people={b.attendees.map((a) => ({ name: a.full_name }))} max={3} size={22} />
+                  )}
+                  {b.user_id === currentUserId && (
+                    <Button size="sm" variant="danger" loading={busy}
+                            onClick={() => run(() => onCancel(b))}>
+                      Stornieren
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {bookings.some((b) => b.comment) && (
+                <p className="rounded-lg border border-line bg-raised px-3 py-2 text-xs text-muted">
+                  {bookings.find((b) => b.comment)?.comment}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Buchen - nur wenn noch ein Zeitfenster frei ist */}
+          {!isFixed && canBookAnything && !ownBooking && (
+            <div className="space-y-3.5 border-t border-line pt-3.5">
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium text-muted">Zeitfenster</p>
+                <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-raised p-1">
+                  {slotOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      disabled={opt.disabled}
+                      onClick={() => setSlot(opt.value)}
+                      className={[
+                        "rounded-md px-2 py-1.5 text-[11px] font-medium transition-all duration-200 focus-ring",
+                        slot === opt.value ? "text-accent-ink shadow-sm" : "text-muted hover:text-ink",
+                        opt.disabled ? "cursor-not-allowed opacity-35 line-through" : "",
+                      ].join(" ")}
+                      style={slot === opt.value ? { background: "var(--accent)" } : undefined}
+                      title={opt.disabled ? "Bereits vergeben" : undefined}
+                    >
+                      {SLOT_LABEL[opt.value]}
+                    </button>
+                  ))}
                 </div>
               </div>
-              {booking!.comment && (
-                <p className="rounded-lg border border-line bg-raised px-3 py-2 text-xs text-muted">
-                  {booking!.comment}
-                </p>
-              )}
-            </>
-          )}
 
-          {isOwn && (
-            <>
-              <p className="text-sm">
-                Du hast diesen Platz gebucht.
-              </p>
-              {booking!.comment && (
-                <p className="rounded-lg border border-line bg-raised px-3 py-2 text-xs text-muted">
-                  {booking!.comment}
-                </p>
-              )}
-            </>
-          )}
+              {isMeetingTable && (
+                <div>
+                  <div className="mb-1.5 flex items-baseline justify-between">
+                    <p className="text-[11px] font-medium text-muted">Teilnehmer</p>
+                    <span className="text-[10px] text-muted/70">
+                      Du + {attendeeIds.length} / {desk.capacity} Plätze
+                    </span>
+                  </div>
 
-          {!booking && !isFixed && (
-            <>
+                  <button
+                    type="button"
+                    onClick={() => { setShowPicker((v) => !v); loadDirectory(); }}
+                    className="flex w-full items-center gap-2 rounded-lg border border-line bg-raised
+                               px-3 py-2 text-left text-sm transition-colors hover:border-accent/40 focus-ring"
+                  >
+                    {attendeeIds.length === 0 ? (
+                      <span className="text-muted">Kolleg:innen hinzufügen…</span>
+                    ) : (
+                      <AvatarGroup
+                        people={attendeeIds
+                          .map((id) => directory.find((p) => p.id === id))
+                          .filter((p): p is { id: string; full_name: string } => !!p)
+                          .map((p) => ({ name: p.full_name }))}
+                        max={5} size={22}
+                      />
+                    )}
+                    <span className="ml-auto text-xs text-muted">{showPicker ? "▲" : "▼"}</span>
+                  </button>
+
+                  {showPicker && (
+                    <div className="mt-1.5 max-h-40 animate-fade-in overflow-y-auto rounded-lg border
+                                    border-line bg-raised p-1 thin-scroll">
+                      {directory.length === 0 && (
+                        <p className="px-2 py-2 text-xs text-muted">Lade Kolleg:innen…</p>
+                      )}
+                      {directory.map((p) => {
+                        const checked = attendeeIds.includes(p.id);
+                        const atLimit = !checked && attendeeIds.length + 1 >= desk.capacity;
+                        return (
+                          <label
+                            key={p.id}
+                            className={[
+                              "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                              atLimit ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:bg-surface",
+                            ].join(" ")}
+                          >
+                            <input
+                              type="checkbox" checked={checked} disabled={atLimit}
+                              onChange={(e) => {
+                                setAttendeeIds((prev) =>
+                                  e.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                                );
+                              }}
+                              className="rounded border-line accent-[var(--accent)]"
+                            />
+                            <Avatar name={p.full_name} size={22} />
+                            <span className="truncate">{p.full_name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Checkbox
                 id="bk-multiday"
                 checked={multiDay}
@@ -142,12 +293,8 @@ export default function BookingPopover({
                              className="w-full rounded-md border border-line bg-raised px-2 py-1.5 text-xs focus-ring" />
                     </label>
                   </div>
-                  <Checkbox
-                    id="bk-skip-we"
-                    checked={skipWeekends}
-                    onChange={setSkipWeekends}
-                    label="Wochenenden auslassen"
-                  />
+                  <Checkbox id="bk-skip-we" checked={skipWeekends} onChange={setSkipWeekends}
+                            label="Wochenenden auslassen" />
                 </div>
               )}
 
@@ -158,12 +305,18 @@ export default function BookingPopover({
                 <textarea
                   id="bk-comment" rows={2} value={comment}
                   onChange={(e) => setComment(e.target.value.slice(0, 280))}
-                  placeholder="z. B. „nur vormittags“"
+                  placeholder="z. B. „Onboarding neuer Kollege“"
                   className="w-full resize-none rounded-lg border border-line bg-raised px-3 py-2 text-sm
                              placeholder:text-muted/60 focus-ring"
                 />
               </div>
-            </>
+            </div>
+          )}
+
+          {!isFixed && !canBookAnything && !ownBooking && (
+            <p className="border-t border-line pt-3.5 text-xs text-muted">
+              Dieser Platz ist an dem Tag vollständig belegt.
+            </p>
           )}
 
           {error && (
@@ -173,26 +326,21 @@ export default function BookingPopover({
           )}
         </CardBody>
 
-        {!isFixed && !isForeign && (
+        {!isFixed && canBookAnything && !ownBooking && (
           <CardFooter>
-            {isOwn ? (
-              <Button variant="danger" className="w-full" loading={busy}
-                      onClick={() => run(() => onCancel(booking!))}>
-                Buchung stornieren
-              </Button>
-            ) : (
-              <Button
-                className="w-full border !border-accent/50 !bg-transparent font-medium text-accent
-                           transition-colors duration-300 hover:!bg-accent hover:!text-accent-ink"
-                loading={busy}
-                onClick={() => run(() => onBook({
-                  comment,
-                  range: multiDay ? { ...range, skipWeekends } : undefined,
-                }))}
-              >
-                {multiDay ? "Zeitraum buchen" : "Platz buchen"}
-              </Button>
-            )}
+            <Button
+              className="w-full border !border-accent/50 !bg-transparent font-medium text-accent
+                         transition-colors duration-300 hover:!bg-accent hover:!text-accent-ink"
+              loading={busy}
+              onClick={() => run(() => onBook({
+                comment,
+                slot,
+                attendeeIds,
+                range: multiDay ? { ...range, skipWeekends } : undefined,
+              }))}
+            >
+              {multiDay ? "Zeitraum buchen" : `${SLOT_LABEL[slot]} buchen`}
+            </Button>
           </CardFooter>
         )}
       </GlowCard>

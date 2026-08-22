@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, ApiError, Booking, Desk, Floor, SceneObject, User } from "@/lib/api";
+import { api, ApiError, Booking, BookingSlot, Desk, Floor, SceneObject, User } from "@/lib/api";
 import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import FloorCanvas from "../components/FloorCanvas";
@@ -34,8 +34,13 @@ function endOfMonth(iso: string) {
 
 export default function Dashboard() {
   const router = useRouter();
-  const { ensure } = useAppData();
-  const [user, setUser] = useState<User | null>(null);
+  const { data, ensure } = useAppData();
+  // Direkt aus dem Cache initialisieren statt mit null zu starten: war die
+  // Seite in dieser Sitzung schon einmal geladen, steht der Nutzername sofort
+  // bereit - ohne das kurze Verschwinden/Wiedererscheinen beim Seitenwechsel,
+  // das entsteht, wenn jede Seite ihren State bei null neu beginnt und erst
+  // nach einem Effekt-Durchlauf wieder auffüllt.
+  const [user, setUser] = useState<User | null>(data.user);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorId, setFloorId] = useState<string | null>(null);
   const [desks, setDesks] = useState<Desk[]>([]);
@@ -49,7 +54,7 @@ export default function Dashboard() {
   // Welcher Tag im Zeitraum wird im Grundriss dargestellt
   const [focusDay, setFocusDay] = useState(toISO(new Date()));
 
-  const [popover, setPopover] = useState<{ desk: Desk; booking: Booking | null; rect: DOMRect } | null>(null);
+  const [popover, setPopover] = useState<{ desk: Desk; bookings: Booking[]; rect: DOMRect } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -128,8 +133,10 @@ export default function Dashboard() {
     if (floorId) await loadFloorData(floorId, period.from, period.to);
   }
 
-  async function handleConfirm({ comment, range }: {
+  async function handleConfirm({ comment, slot, attendeeIds, range }: {
     comment: string;
+    slot: BookingSlot;
+    attendeeIds: string[];
     range?: { from: string; to: string; skipWeekends: boolean };
   }) {
     if (!popover) return;
@@ -138,7 +145,7 @@ export default function Dashboard() {
         method: "POST",
         body: JSON.stringify({
           desk_id: popover.desk.id, date_from: range.from, date_to: range.to,
-          comment, skip_weekends: range.skipWeekends,
+          slot, comment, attendee_ids: attendeeIds, skip_weekends: range.skipWeekends,
         }),
       });
       if (res.created.length === 0) {
@@ -150,7 +157,7 @@ export default function Dashboard() {
     } else {
       await api<Booking>("/api/bookings", {
         method: "POST",
-        body: JSON.stringify({ desk_id: popover.desk.id, booking_date: focusDay, comment }),
+        body: JSON.stringify({ desk_id: popover.desk.id, booking_date: focusDay, slot, comment, attendee_ids: attendeeIds }),
       });
     }
     await reload();
@@ -175,19 +182,33 @@ export default function Dashboard() {
     });
   }, [days, bookings, desks, mine]);
 
-  const bookingByDesk = useMemo(
-    () => new Map(bookings.filter((b) => b.booking_date === focusDay).map((b) => [b.desk_id, b])),
-    [bookings, focusDay]
-  );
+  // Ein Platz kann pro Tag zwei Halbtags-Buchungen tragen - daher eine Liste.
+  const bookingByDesk = useMemo(() => {
+    const map = new Map<string, Booking[]>();
+    bookings
+      .filter((b) => b.booking_date === focusDay)
+      .forEach((b) => {
+        const list = map.get(b.desk_id) ?? [];
+        list.push(b);
+        map.set(b.desk_id, list);
+      });
+    return map;
+  }, [bookings, focusDay]);
+
+  /** Ein Platz gilt als voll, wenn ganztags gebucht ist oder beide Halbtage weg sind. */
+  const isFullyBooked = (deskId: string) => {
+    const list = bookingByDesk.get(deskId) ?? [];
+    return list.some((b) => b.slot === "full") || list.length >= 2;
+  };
   const currentFloor = floors.find((f) => f.id === floorId);
   const myBookingToday = mine.find((b) => b.booking_date === focusDay);
 
   const activeDesks = useMemo(() => desks.filter((d) => d.is_active), [desks]);
-  const freeCount = activeDesks.filter((d) => !d.fixed_user_id && !bookingByDesk.has(d.id)).length;
+  const freeCount = activeDesks.filter((d) => !d.fixed_user_id && !isFullyBooked(d.id)).length;
 
   if (loading) {
     return (
-      <AppShell user={null}>
+      <AppShell user={user}>
         <FloorSkeleton />
       </AppShell>
     );
@@ -202,7 +223,7 @@ export default function Dashboard() {
             <h1 className="text-xl font-semibold tracking-tight capitalize glow-text">{formatLong(focusDay)}</h1>
             <p className="mt-0.5 text-sm text-muted">
               {myBookingToday ? (
-                <>Dein Platz: <span className="font-mono">{myBookingToday.desk_name}</span></>
+                <>Dein Platz: <span className="tabular-nums">{myBookingToday.desk_name}</span></>
               ) : (
                 <>{freeCount} von {activeDesks.length} Plätzen frei</>
               )}
@@ -266,7 +287,7 @@ export default function Dashboard() {
               objects={objects}
               bookingByDesk={bookingByDesk}
               currentUserId={user.id}
-              onDeskClick={(desk, booking, rect) => setPopover({ desk, booking: booking ?? null, rect })}
+              onDeskClick={(desk, list, rect) => setPopover({ desk, bookings: list, rect })}
             />
           </div>
         ) : (
@@ -288,7 +309,7 @@ export default function Dashboard() {
                      className="group/booking rounded-lg border border-line bg-surface p-3 transition-all
                                 duration-200 hover:border-accent/40 hover:shadow-sm">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-sm font-medium">{b.desk_name}</span>
+                    <span className="text-sm font-medium tabular-nums">{b.desk_name}</span>
                     <span className="text-xs text-muted">{formatLong(b.booking_date)}</span>
                   </div>
                   {b.comment && <p className="mt-1 truncate text-xs text-muted">{b.comment}</p>}
@@ -304,9 +325,9 @@ export default function Dashboard() {
       <BookingPopover
         anchor={popover?.rect ?? null}
         desk={popover?.desk ?? null}
-        booking={popover?.booking ?? null}
+        bookings={popover?.bookings ?? []}
         date={focusDay}
-        canManage={popover?.booking?.user_id === user?.id}
+        currentUserId={user?.id ?? ""}
         onClose={() => setPopover(null)}
         onBook={handleConfirm}
         onCancel={handleCancel}

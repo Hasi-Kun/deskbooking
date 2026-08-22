@@ -86,7 +86,7 @@ export default function ColorPicker({ label, hint, value, onChange, presets = DE
           className="h-6 w-6 shrink-0 rounded-md border border-black/25 transition-transform duration-200"
           style={{ background: value }}
         />
-        <span className="font-mono text-xs uppercase tracking-wide text-muted">{value}</span>
+        <span className="text-xs uppercase tracking-wide text-muted tabular-nums">{value}</span>
       </button>
 
       {mounted && open && pos && createPortal(

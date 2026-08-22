@@ -3,10 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, Booking, Desk, Floor, User } from "@/lib/api";
 import AppShell from "../components/AppShell";
+import { useAppData } from "../components/AppDataProvider";
 import { GlowCard, CardHeader, CardBody, StatPair } from "../components/ui/GlowCard";
 import Button from "../components/ui/Button";
 import { ListSkeleton } from "../components/ui/Skeleton";
 import { toISO, fromISO } from "../components/ui/DatePicker";
+import DayResourceView from "../components/DayResourceView";
 
 const addDays = (iso: string, n: number) => {
   const d = fromISO(iso);
@@ -18,13 +20,16 @@ type Span = 14 | 30 | 60;
 
 export default function OverviewPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const { data, ensure } = useAppData();
+  const [user, setUser] = useState<User | null>(data.user);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorId, setFloorId] = useState<string | null>(null);
   const [desks, setDesks] = useState<Desk[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [span, setSpan] = useState<Span>(14);
   const [start, setStart] = useState(toISO(new Date()));
+  const [view, setView] = useState<"matrix" | "day">("matrix");
+  const [dayFocus, setDayFocus] = useState(toISO(new Date()));
   const [loading, setLoading] = useState(true);
 
   // Nur Werktage (Mo-Fr). Es wird so lange weitergezaehlt, bis "span" viele
@@ -53,11 +58,11 @@ export default function OverviewPage() {
   useEffect(() => {
     (async () => {
       try {
-        const u = await api<User>("/api/auth/me");
-        setUser(u);
-        const f = await api<Floor[]>("/api/floors");
-        setFloors(f);
-        const first = f[0]?.id ?? null;
+        const cache = await ensure({ user: true, floors: true });
+        if (!cache.user) throw new Error("nicht angemeldet");
+        setUser(cache.user);
+        setFloors(cache.floors);
+        const first = cache.floors[0]?.id ?? null;
         setFloorId(first);
         if (first) await load(first, days[0], days[days.length - 1]);
       } catch {
@@ -73,6 +78,14 @@ export default function OverviewPage() {
     if (!user || !floorId) return;
     load(floorId, days[0], days[days.length - 1]).catch(() => {});
   }, [user, floorId, days, load]);
+
+  // Tagesansicht: an den geladenen Zeitraum klemmen, statt einen eigenen
+  // Netzwerk-Request zu feuern - "days" deckt den Bereich schon ab.
+  useEffect(() => {
+    if (days.length && !days.includes(dayFocus)) setDayFocus(days[0]);
+  }, [days, dayFocus]);
+
+  const dayIndex = days.indexOf(dayFocus);
 
   // Buchungen nach Platz + Tag, für schnellen Zugriff je Zelle
   const byDeskDay = useMemo(() => {
@@ -112,7 +125,7 @@ export default function OverviewPage() {
   const todayISO = toISO(new Date());
 
   if (loading) {
-    return <AppShell user={null}><ListSkeleton rows={6} /></AppShell>;
+    return <AppShell user={user}><ListSkeleton rows={6} /></AppShell>;
   }
 
   return (
@@ -133,29 +146,82 @@ export default function OverviewPage() {
               </Button>
             ))}
             <div className="inline-flex rounded-lg border border-line">
-              {([14, 30, 60] as Span[]).map((s, i) => (
+              {([
+                ["matrix", "Matrix"], ["day", "Tag"],
+              ] as [typeof view, string][]).map(([v, label], i) => (
                 <button
-                  key={s}
-                  onClick={() => setSpan(s)}
+                  key={v}
+                  onClick={() => setView(v)}
                   className={[
                     "px-2.5 py-1.5 text-xs font-medium transition-colors focus-ring",
-                    i === 0 ? "rounded-l-lg" : i === 2 ? "rounded-r-lg" : "border-x border-line",
-                    span === s ? "text-accent-ink" : "text-muted hover:bg-raised hover:text-ink",
+                    i === 0 ? "rounded-l-lg" : "rounded-r-lg",
+                    view === v ? "text-accent-ink" : "text-muted hover:bg-raised hover:text-ink",
                   ].join(" ")}
-                  style={span === s ? { background: "var(--accent)" } : undefined}
+                  style={view === v ? { background: "var(--accent)" } : undefined}
                 >
-                  {s}T
+                  {label}
                 </button>
               ))}
             </div>
-            <input
-              type="date" value={start}
-              onChange={(e) => e.target.value && setStart(e.target.value)}
-              className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs focus-ring"
-            />
+            {view === "matrix" && (
+              <div className="inline-flex rounded-lg border border-line">
+                {([14, 30, 60] as Span[]).map((s, i) => (
+                  <button
+                    key={s}
+                    onClick={() => setSpan(s)}
+                    className={[
+                      "px-2.5 py-1.5 text-xs font-medium transition-colors focus-ring",
+                      i === 0 ? "rounded-l-lg" : i === 2 ? "rounded-r-lg" : "border-x border-line",
+                      span === s ? "text-accent-ink" : "text-muted hover:bg-raised hover:text-ink",
+                    ].join(" ")}
+                    style={span === s ? { background: "var(--accent)" } : undefined}
+                  >
+                    {s}T
+                  </button>
+                ))}
+              </div>
+            )}
+            {view === "day" ? (
+              <div className="inline-flex items-stretch rounded-lg border border-line">
+                <button
+                  onClick={() => dayIndex > 0 && setDayFocus(days[dayIndex - 1])}
+                  disabled={dayIndex <= 0}
+                  aria-label="Vorheriger Tag"
+                  className="grid w-8 place-items-center rounded-l-lg text-muted transition-colors
+                             hover:bg-raised hover:text-ink focus-ring disabled:opacity-30"
+                >
+                  ‹
+                </button>
+                <input
+                  type="date" value={dayFocus} min={days[0]} max={days[days.length - 1]}
+                  onChange={(e) => e.target.value && days.includes(e.target.value) && setDayFocus(e.target.value)}
+                  className="border-x border-line bg-surface px-2.5 py-1.5 text-xs focus-ring"
+                />
+                <button
+                  onClick={() => dayIndex >= 0 && dayIndex < days.length - 1 && setDayFocus(days[dayIndex + 1])}
+                  disabled={dayIndex < 0 || dayIndex >= days.length - 1}
+                  aria-label="Nächster Tag"
+                  className="grid w-8 place-items-center rounded-r-lg text-muted transition-colors
+                             hover:bg-raised hover:text-ink focus-ring disabled:opacity-30"
+                >
+                  ›
+                </button>
+              </div>
+            ) : (
+              <input
+                type="date" value={start}
+                onChange={(e) => e.target.value && setStart(e.target.value)}
+                className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs focus-ring"
+              />
+            )}
           </div>
         </div>
 
+        {view === "day" && (
+          <DayResourceView day={dayFocus} desks={desks} bookings={bookings} currentUserId={user?.id} />
+        )}
+
+        {view === "matrix" && <>
         {/* Kennzahlen im Karten-Stil */}
         <GlowCard>
           <CardHeader icon={<ChartIcon />} title="Auslastung im Zeitraum"
@@ -212,7 +278,7 @@ export default function OverviewPage() {
                 <tr key={desk.id} className="group/row border-t border-line">
                   <td className="sticky left-0 z-10 bg-surface px-3 py-1.5 transition-colors
                                  group-hover/row:bg-raised">
-                    <span className="font-mono text-[11px] font-semibold">{desk.name}</span>
+                    <span className="text-[11px] font-semibold tabular-nums">{desk.name}</span>
                     {desk.fixed_user_id && (
                       <span className="ml-1.5 text-[9px] text-muted">fest</span>
                     )}
@@ -272,6 +338,7 @@ export default function OverviewPage() {
           <Legend className="bg-occupied/25" label="Fest vergeben" />
           <Legend className="bg-line/40" label="Wochenende" />
         </div>
+        </>}
       </div>
     </AppShell>
   );

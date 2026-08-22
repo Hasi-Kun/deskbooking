@@ -23,8 +23,15 @@ module.exports = {
         danger: "rgb(var(--c-danger) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        mono: ["ui-monospace", "JetBrains Mono", "SFMono-Regular", "Menlo", "monospace"],
+        // Verdana als Leitschrift - sehr breit verfuegbar und auf Bildschirmen
+        // auch in kleinen Groessen gut lesbar.
+        sans: ["Verdana", "Geneva", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        // "mono" zeigt bewusst ebenfalls auf Verdana: die Schrift soll
+        // konsequent überall gelten. Zahlenausrichtung (Codes, Farbwerte,
+        // Tischnamen) läuft stattdessen über die CSS-Zahlfunktion
+        // "tabular-nums", die feste Ziffernbreiten liefert, ohne die
+        // Schriftart zu wechseln.
+        mono: ["Verdana", "Geneva", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
       },
       borderRadius: { xl2: "16px" },
       transitionTimingFunction: {

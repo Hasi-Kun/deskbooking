@@ -128,18 +128,23 @@ export default function PeriodNavigator({
         <Chevron dir="right" />
       </button>
 
-      {!isToday && (
-        <button
-          onClick={() => {
-            onAnchorChange(todayISO);
-            if (mode === "custom") onCustomChange(todayISO, addDays(todayISO, 6));
-          }}
-          className="border-l border-line px-2.5 text-xs text-muted transition-colors
-                     hover:bg-raised hover:text-ink focus-ring rounded-r-lg"
-        >
-          Heute
-        </button>
-      )}
+      {/* Immer sichtbar (nicht mehr weg-animiert, sobald der Zeitraum "heute"
+          entspricht) - so bleibt die Referenz zum aktuellen Tag jederzeit an
+          derselben Stelle greifbar, statt bei jedem Rücksprung zu verschwinden.
+          Nur der Klick selbst ist deaktiviert, wenn man schon auf "heute" steht. */}
+      <button
+        onClick={() => {
+          onAnchorChange(todayISO);
+          if (mode === "custom") onCustomChange(todayISO, addDays(todayISO, 6));
+        }}
+        disabled={isToday}
+        className={[
+          "border-l border-line px-2.5 text-xs transition-colors duration-200 rounded-r-lg",
+          isToday ? "text-muted/40 cursor-default" : "text-muted hover:bg-raised hover:text-ink focus-ring",
+        ].join(" ")}
+      >
+        Heute
+      </button>
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+8px)] z-40">

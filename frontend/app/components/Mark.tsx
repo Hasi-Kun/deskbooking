@@ -13,7 +13,7 @@ export default function Mark({ size = 36 }: { size?: number }) {
   return (
     <div
       style={{ height: size, width: size, background: "var(--accent)" }}
-      className="rounded-lg flex items-center justify-center text-white font-mono font-semibold"
+      className="rounded-lg flex items-center justify-center text-white font-semibold"
     >
       {initial}
     </div>

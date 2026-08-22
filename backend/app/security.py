@@ -71,3 +71,21 @@ def verify_totp(secret: str, code: str) -> bool:
     if not secret or not code:
         return False
     return pyotp.TOTP(secret).verify(code.strip(), valid_window=1)
+
+
+def generate_backup_codes(count: int = 10) -> list[str]:
+    """Gut lesbare Einmal-Codes im Format XXXX-XXXX (ohne 0/O/1/I/L, um
+    Verwechslungen beim Abtippen zu vermeiden)."""
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    codes = []
+    for _ in range(count):
+        raw = "".join(secrets.choice(alphabet) for _ in range(8))
+        codes.append(f"{raw[:4]}-{raw[4:]}")
+    return codes
+
+
+def hash_backup_code(code: str) -> str:
+    """SHA-256 reicht hier: die Codes haben selbst hohe Entropie (31^8),
+    anders als von Menschen gewaehlte Passwoerter."""
+    normalized = code.strip().upper().replace(" ", "")
+    return hashlib.sha256(normalized.encode()).hexdigest()

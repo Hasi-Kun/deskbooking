@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { forwardRef, useCallback, useRef, useState } from "react";
 
 type Ripple = { id: number; x: number; y: number; size: number };
 type Variant = "primary" | "secondary" | "ghost" | "danger";
@@ -24,9 +24,10 @@ const variants: Record<Variant, string> = {
 
 const sizes = { sm: "text-xs px-2.5 py-1.5", md: "text-sm px-3.5 py-2" };
 
-export default function Button({
-  variant = "secondary", size = "md", loading, className = "", children, onClick, ...rest
-}: Props) {
+const Button = forwardRef<HTMLButtonElement, Props>(function Button(
+  { variant = "secondary", size = "md", loading, className = "", children, onClick, ...rest },
+  ref
+) {
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const nextId = useRef(0);
 
@@ -50,6 +51,7 @@ export default function Button({
   return (
     <button
       {...rest}
+      ref={ref}
       onClick={handleClick}
       disabled={rest.disabled || loading}
       style={variant === "primary" ? { background: "var(--accent)", ...rest.style } : rest.style}
@@ -66,7 +68,9 @@ export default function Button({
       {loading && (
         <span className="h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
       )}
-      <span className="relative">{children}</span>
+      <span className="relative inline-flex items-center justify-center gap-1.5">{children}</span>
     </button>
   );
-}
+});
+
+export default Button;

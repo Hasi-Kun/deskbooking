@@ -42,7 +42,10 @@ class Settings(BaseSettings):
     # --- Auth / JWT ---
     JWT_SECRET_KEY: str = "CHANGE_ME_MIN_32_CHARS_RANDOM_VALUE"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # Zugriffs-Token laeuft nach Inaktivitaet ab. Das Frontend erneuert es
+    # solange, wie jemand aktiv ist - nach einer Stunde ohne Aktivitaet ist
+    # damit Schluss.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     MAX_FAILED_LOGINS: int = 5
     LOCKOUT_MINUTES: int = 15
@@ -58,6 +61,19 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD_HASH: str = ""
     ADMIN_NAME: str = "Administrator"
 
+    # --- Passkeys / WebAuthn (YubiKey, Touch ID, Windows Hello, ...) ---
+    # Leer lassen, um sie aus DOMAIN/PUBLIC_URL abzuleiten (Normalfall).
+    WEBAUTHN_RP_ID: str = ""
+    WEBAUTHN_ORIGIN: str = ""
+
+    @property
+    def webauthn_rp_id(self) -> str:
+        return self.WEBAUTHN_RP_ID or self.DOMAIN
+
+    @property
+    def webauthn_origin(self) -> str:
+        return self.WEBAUTHN_ORIGIN or self.PUBLIC_URL
+
     # --- Branding / Customizing (kein festes Branding im Code, alles konfigurierbar) ---
     APP_NAME: str = "Deskbooking"
     # Akzentfarbe der Oberflaeche. Aenderbar in der .env ODER zur Laufzeit
@@ -68,6 +84,9 @@ class Settings(BaseSettings):
     GRADIENT_FROM: str = "#1E5799"
     GRADIENT_MID: str = "#F300FF"
     GRADIENT_TO: str = "#E0FF00"
+    # Farbverlauf ueberhaupt anzeigen? Bei "false" wird stattdessen die
+    # Akzentfarbe einfarbig verwendet (ruhigeres Erscheinungsbild).
+    GRADIENT_ENABLED: bool = True
     # Farbe des dezenten Scheins im Seitenhintergrund - ebenfalls separat.
     AMBIENT_COLOR: str = "#34D399"
     LOGO_URL: str = ""                       # leer = Platzhalter-Icon im Frontend

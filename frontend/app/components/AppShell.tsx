@@ -1,17 +1,32 @@
 "use client";
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { api, User } from "@/lib/api";
+import { api, User, clearSessionActive } from "@/lib/api";
 import { useBrand } from "./BrandProvider";
 import Mark from "./Mark";
 import SettingsMenu from "./SettingsMenu";
+import ChatDrawer from "./ChatDrawer";
+import { useTheme } from "./ThemeToggle";
 import Button from "./ui/Button";
 
 /** Gemeinsame Kopfzeile aller angemeldeten Seiten. */
 export default function AppShell({
   user, children,
 }: { user: User | null; children: React.ReactNode }) {
+  const { bindUser } = useTheme();
+  // Sobald bekannt ist, wer angemeldet ist, gilt dessen gespeicherte Vorliebe.
+  useEffect(() => {
+    // Absichtlich NICHTS tun, solange der Nutzer noch lädt (user ist dann
+    // kurzzeitig null, auch wenn die Person tatsächlich angemeldet ist).
+    // bindUser(null) würde sonst bedingungslos auf die Systemeinstellung
+    // zurückfallen und den gespiegelten/gespeicherten Wert ignorieren - das
+    // war der zweite, unabhängige Flacker-Punkt: pre-paint-Skript setzt
+    // korrekt "dunkel", die Ladephase kippt kurz auf "hell" (System), und
+    // erst danach stellt sich die echte Kontoeinstellung wieder her.
+    if (user?.id) bindUser(user.id);
+  }, [user?.id, bindUser]);
   const { app_name } = useBrand();
   const router = useRouter();
   const pathname = usePathname();
@@ -29,6 +44,8 @@ export default function AppShell({
   ];
 
   async function logout() {
+    clearSessionActive();
+    bindUser(null);
     await api("/api/auth/logout", { method: "POST" }).catch(() => {});
     router.replace("/login");
   }
@@ -51,17 +68,15 @@ export default function AppShell({
                     href={item.href}
                     prefetch
                     className={[
-                      "relative rounded-lg px-3 py-1.5 text-sm transition-colors duration-200 focus-ring",
-                      active ? "text-ink" : "text-muted hover:text-ink",
+                      "rounded-lg px-3 py-1.5 text-sm transition-colors duration-200 focus-ring",
+                      // Kein Strich mehr unter dem aktiven Tab - die Auszeichnung
+                      // läuft ausschließlich über die Textfarbe: im Dunkelmodus
+                      // heller/reinweiß, im Hellmodus kräftiges Schwarz statt
+                      // des sonst etwas gedämpften Fließtexts.
+                      active ? "text-ink font-medium dark:text-white" : "text-muted hover:text-ink",
                     ].join(" ")}
                   >
                     {item.label}
-                    {active && (
-                      <span
-                        className="absolute inset-x-2 -bottom-[13px] h-0.5 rounded-full"
-                        style={{ background: "var(--accent)" }}
-                      />
-                    )}
                   </Link>
                 );
               })}
@@ -92,6 +107,7 @@ export default function AppShell({
         <div className="gradient-bar" aria-hidden="true" />
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      {user && <ChatDrawer currentUser={user} />}
     </div>
   );
 }

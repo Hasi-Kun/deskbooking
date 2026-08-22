@@ -10,8 +10,8 @@ import { ListSkeleton } from "../../components/ui/Skeleton";
 
 export default function UserAdmin() {
   const router = useRouter();
-  const { ensure, invalidate } = useAppData();
-  const [me, setMe] = useState<User | null>(null);
+  const { data, ensure, invalidate } = useAppData();
+  const [me, setMe] = useState<User | null>(data.user);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

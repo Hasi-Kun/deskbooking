@@ -17,6 +17,9 @@ def _to_out(d: Desk) -> DeskOut:
         pos_x=d.pos_x, pos_y=d.pos_y, is_active=d.is_active,
         fixed_user_id=d.fixed_user_id,
         fixed_user_name=d.fixed_user.full_name if d.fixed_user else None,
+        fixed_user_style=d.fixed_user.name_style if d.fixed_user else "plain",
+        fixed_user_style_color=d.fixed_user.name_style_color if d.fixed_user else "#35E0C0",
+        capacity=d.capacity,
     )
 
 

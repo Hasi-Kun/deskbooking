@@ -16,7 +16,7 @@ from .models import User, Role, Desk, Floor
 from .security import hash_password
 from .schemas import PublicConfig
 from .routers.settings import load_appearance
-from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router
+from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router, webauthn, chat
 from .routers.auth import limiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -61,6 +61,24 @@ async def _run_migrations():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
         # v2: Notiz an einer Buchung
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS comment VARCHAR(280) NOT NULL DEFAULT ''",
+        # v3: Zeitfenster (ganztags / vormittags / nachmittags).
+        # Der Enum-Typ muss existieren, bevor die Spalte ihn nutzen kann.
+        "DO $$ BEGIN CREATE TYPE bookingslot AS ENUM ('full','morning','afternoon'); "
+        "EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS slot bookingslot NOT NULL DEFAULT 'full'",
+        # Alte Eindeutigkeit galt pro (Platz, Tag) - jetzt pro (Platz, Tag, Zeitfenster),
+        # damit sich Vor- und Nachmittag denselben Platz teilen koennen.
+        "ALTER TABLE bookings DROP CONSTRAINT IF EXISTS uq_desk_date_active",
+        "DO $$ BEGIN ALTER TABLE bookings ADD CONSTRAINT uq_desk_date_slot "
+        "UNIQUE (desk_id, booking_date, slot); "
+        "EXCEPTION WHEN duplicate_table THEN NULL; WHEN duplicate_object THEN NULL; END $$",
+        # v4: Namens-Stil (Glitzer-Effekt) - rein kosmetisch.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS name_style VARCHAR(20) NOT NULL DEFAULT 'plain'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS name_style_color VARCHAR(7) NOT NULL DEFAULT '#35E0C0'",
+        # v5: Kapazitaet je Platz - >1 macht ihn zum Konferenztisch mit
+        # Gruppen-Buchung (booking_attendees ist eine neue Tabelle, die
+        # create_all() automatisch anlegt und daher hier nicht braucht).
+        "ALTER TABLE desks ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 1",
     ]
     async with engine.begin() as conn:
         for stmt in statements:
@@ -163,5 +181,6 @@ app.include_router(desks.router)
 app.include_router(bookings.router)
 app.include_router(scene.router)
 app.include_router(settings_router.router)
+app.include_router(webauthn.router)
+app.include_router(chat.router)
 app.include_router(admin_users.router)
-app.include_router(settings_router.router)

@@ -6,7 +6,8 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
-    totp_code: str | None = Field(default=None, max_length=6)
+    # 6 Ziffern (Authenticator) ODER ein Einmal-Code im Format XXXX-XXXX.
+    totp_code: str | None = Field(default=None, max_length=16)
 
 
 class TokenResponse(BaseModel):
@@ -27,6 +28,8 @@ class UserOut(BaseModel):
     email: EmailStr
     full_name: str
     role: str
+    name_style: str = "plain"
+    name_style_color: str = "#35E0C0"
 
 
 class UserCreate(BaseModel):
@@ -77,12 +80,16 @@ class DeskOut(BaseModel):
     is_active: bool
     fixed_user_id: str | None = None
     fixed_user_name: str | None = None
+    fixed_user_style: str = "plain"
+    fixed_user_style_color: str = "#35E0C0"
+    capacity: int = 1
 
 
 class DeskCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     floor_id: str
     zone: str = ""
+    capacity: int = Field(default=1, ge=1, le=30)
     pos_x: float = 0
     pos_y: float = 0
 
@@ -98,13 +105,16 @@ class DeskUpdate(BaseModel):
     floor_id: str | None = None
     fixed_user_id: str | None = None            # "" oder null => Zuweisung entfernen
     clear_fixed_user: bool = False              # explizit setzen, um Zuweisung zu entfernen
+    capacity: int | None = Field(default=None, ge=1, le=30)
 
 
 # ---------- Booking ----------
 class BookingCreate(BaseModel):
     desk_id: str
     booking_date: date
+    slot: str = "full"          # full | morning | afternoon
     comment: str = Field(default="", max_length=280)
+    attendee_ids: list[str] = Field(default_factory=list, max_length=29)
 
 
 class BookingRangeCreate(BaseModel):
@@ -112,8 +122,17 @@ class BookingRangeCreate(BaseModel):
     desk_id: str
     date_from: date
     date_to: date
+    slot: str = "full"
     comment: str = Field(default="", max_length=280)
+    attendee_ids: list[str] = Field(default_factory=list, max_length=29)
     skip_weekends: bool = True
+
+
+class AttendeeOut(BaseModel):
+    id: str
+    full_name: str
+    name_style: str = "plain"
+    name_style_color: str = "#35E0C0"
 
 
 class BookingOut(BaseModel):
@@ -123,9 +142,13 @@ class BookingOut(BaseModel):
     desk_name: str
     user_id: str
     user_name: str
+    user_name_style: str = "plain"
+    user_name_style_color: str = "#35E0C0"
     booking_date: date
     status: str
+    slot: str = "full"
     comment: str = ""
+    attendees: list[AttendeeOut] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -141,6 +164,7 @@ class PublicConfig(BaseModel):
     gradient_from: str
     gradient_mid: str
     gradient_to: str
+    gradient_enabled: bool
     ambient_color: str
     logo_url: str
     support_contact: str
@@ -210,6 +234,9 @@ class UserStatusOut(BaseModel):
     role: str
     is_active: bool
     totp_enabled: bool
+    backup_codes_remaining: int = 0
+    name_style: str = "plain"
+    name_style_color: str = "#35E0C0"
 
 
 class RoleUpdate(BaseModel):
@@ -228,4 +255,83 @@ class AppearanceUpdate(BaseModel):
     gradient_from: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     gradient_mid: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     gradient_to: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    gradient_enabled: bool | None = None
     ambient_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class BackupCodesResponse(BaseModel):
+    """Codes im Klartext - werden genau einmal ausgeliefert."""
+    codes: list[str]
+
+
+class BackupCodeStatus(BaseModel):
+    remaining: int
+    total: int
+
+
+class NameStyleUpdate(BaseModel):
+    name_style: str = Field(pattern=r"^(plain|glitter)$")
+    name_style_color: str = Field(default="#35E0C0", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+# ---------- Passkeys / WebAuthn ----------
+class WebAuthnRegisterVerify(BaseModel):
+    token: str
+    credential: dict          # rohes JSON des Browsers (navigator.credentials.create())
+    nickname: str = Field(default="", max_length=64)
+
+
+class WebAuthnLoginOptionsRequest(BaseModel):
+    email: EmailStr
+
+
+class WebAuthnLoginVerify(BaseModel):
+    token: str
+    credential: dict          # rohes JSON des Browsers (navigator.credentials.get())
+
+
+class PasskeyOut(BaseModel):
+    id: str
+    nickname: str
+    device_type: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+# ---------- Chat ----------
+class MessageCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+    recipient_id: str | None = None   # None = globaler Kanal
+
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    channel: str
+    sender_id: str
+    sender_name: str
+    sender_name_style: str = "plain"
+    sender_name_style_color: str = "#35E0C0"
+    recipient_id: str | None = None
+    body: str
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    """Eine Zeile in der DM-Liste: mit wem, letzte Nachricht, ungelesen."""
+    user_id: str
+    user_name: str
+    user_name_style: str = "plain"
+    user_name_style_color: str = "#35E0C0"
+    last_message: str
+    last_at: datetime
+    unread: int
+
+
+class DirectoryUser(BaseModel):
+    """Sehr knappe Auskunft für die Personensuche im Chat - bewusst ohne
+    E-Mail, Rolle oder 2FA-Status, das braucht dafür niemand zu sehen."""
+    id: str
+    full_name: str
+    name_style: str = "plain"
+    name_style_color: str = "#35E0C0"

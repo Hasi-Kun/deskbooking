@@ -9,6 +9,7 @@ import InventoryPalette, { PaletteItem } from "../../components/InventoryPalette
 import { OBJECT_DEFAULTS } from "../../components/SceneIcons";
 import ElementPopover from "../../components/ElementPopover";
 import Button from "../../components/ui/Button";
+import EditorGuide from "../../components/EditorGuide";
 import { Skeleton } from "../../components/ui/Skeleton";
 
 /** Gesammelte, noch nicht gespeicherte Aenderungen. Positionen werden beim
@@ -30,15 +31,16 @@ const SIZE_PRESETS = [
 
 export default function LayoutBuilder() {
   const router = useRouter();
-  const { ensure, setFloors: cacheFloors, invalidate } = useAppData();
-  const [user, setUser] = useState<User | null>(null);
+  const { data, ensure, setFloors: cacheFloors, invalidate } = useAppData();
+  const [user, setUser] = useState<User | null>(data.user);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorId, setFloorId] = useState<string | null>(null);
   const [desks, setDesks] = useState<Desk[]>([]);
   const [objects, setObjects] = useState<SceneObject[]>([]);
   const [people, setPeople] = useState<AdminUser[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  // Position des Kontextmenüs (Mauszeiger beim Rechtsklick).
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [wallMode, setWallMode] = useState(false);
   const [newFloor, setNewFloor] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +49,9 @@ export default function LayoutBuilder() {
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const pending = useRef<Pending>(emptyPending());
+  // save() liest den aktuellen Ebenen-Stand über eine Ref (nicht über die
+  // Closure), damit auch direkt nach einer Größenänderung der neue Wert gilt.
+  const floorsRef = useRef<Floor[]>([]);
   const [dirty, setDirty] = useState(false);
 
   const markDirty = () => setDirty(true);
@@ -136,6 +141,10 @@ export default function LayoutBuilder() {
         calls.push(api(`/api/floors/${floorId}`, { method: "PATCH", body: JSON.stringify(p.floor) }));
       }
       await Promise.all(calls);
+      // WICHTIG: Der gemeinsame Stammdaten-Cache hält die Ebenen über
+      // Seitenwechsel hinweg. Ohne dieses Update käme beim nächsten Aufruf
+      // die alte Größe zurück - die Änderung wirkte dann wie "nicht gespeichert".
+      if (p.floor) cacheFloors(floorsRef.current);
       pending.current = emptyPending();
       setDirty(false);
       setSavedAt(new Date());
@@ -169,11 +178,17 @@ export default function LayoutBuilder() {
     if (!floorId) return;
     try {
       if (item.kind === "desk") {
+        const isMeeting = item.variant === "meeting";
         const desk = await api<Desk>("/api/desks", {
           method: "POST",
           body: JSON.stringify({
-            name: `D-${String(desks.length + 1).padStart(2, "0")}`,
+            name: isMeeting
+              ? `K-${String(desks.filter((d) => d.capacity > 1).length + 1).padStart(2, "0")}`
+              : `D-${String(desks.length + 1).padStart(2, "0")}`,
             floor_id: floorId, pos_x: x, pos_y: y,
+            // Konferenztisch: Standard-Kapazität für Gruppenbuchung, sonst 1
+            // (Kapazität lässt sich im Detail-Panel jederzeit anpassen).
+            ...(isMeeting ? { capacity: 4 } : {}),
           }),
         });
         setDesks((p) => [...p, desk]);
@@ -259,17 +274,18 @@ export default function LayoutBuilder() {
         pending.current.objects.delete(selection.id);
       }
       setSelection(null);
-      setAnchorRect(null);
+      setMenuAt(null);
     } catch (e) { fail(e); }
   }
 
+  floorsRef.current = floors;
   const currentFloor = floors.find((f) => f.id === floorId);
   const selDesk = selection?.type === "desk" ? desks.find((d) => d.id === selection.id) ?? null : null;
   const selObject = selection?.type === "object" ? objects.find((o) => o.id === selection.id) ?? null : null;
   const hasPanel = !!(selDesk || selObject);
 
   if (loading) {
-    return <AppShell user={null}><Skeleton className="h-96 w-full rounded-xl2" /></AppShell>;
+    return <AppShell user={user}><Skeleton className="h-96 w-full rounded-xl2" /></AppShell>;
   }
 
   return (
@@ -285,7 +301,7 @@ export default function LayoutBuilder() {
                 if (dirty && !confirm("Ungespeicherte Änderungen gehen verloren. Trotzdem wechseln?")) return;
                 setFloorId(f.id);
                 setSelection(null);
-                setAnchorRect(null);
+                setMenuAt(null);
               }}
             >
               {f.name}
@@ -330,7 +346,7 @@ export default function LayoutBuilder() {
       <div className="grid gap-4 lg:grid-cols-[196px_1fr]">
         <InventoryPalette
           wallMode={wallMode}
-          onToggleWallMode={() => { setWallMode((v) => !v); setSelection(null); setAnchorRect(null); }}
+          onToggleWallMode={() => { setWallMode((v) => !v); setSelection(null); setMenuAt(null); }}
         />
 
         <div className="min-w-0 space-y-2">
@@ -376,9 +392,14 @@ export default function LayoutBuilder() {
               objects={objects}
               selection={selection}
               wallMode={wallMode}
-              onSelect={(sel, rect) => {
+              onSelect={(sel) => {
                 setSelection(sel);
-                setAnchorRect(sel ? rect ?? null : null);
+                // Linksklick wählt nur aus - die Eigenschaften kommen per Rechtsklick.
+                setMenuAt(null);
+              }}
+              onContext={(sel, at) => {
+                setSelection(sel);
+                setMenuAt(at);
               }}
               onMoveDesk={moveDesk}
               onMoveObject={moveObject}
@@ -389,19 +410,17 @@ export default function LayoutBuilder() {
           ) : (
             <p className="text-sm text-muted">Lege zuerst eine Ebene an.</p>
           )}
-          <p className="text-[11px] text-muted">
-            Positionen rasten am 20-px-Raster ein. Änderungen mit „Speichern" (Strg + S) übernehmen.
-          </p>
+          <EditorGuide />
         </div>
 
       </div>
 
       <ElementPopover
-        anchor={anchorRect}
+        at={menuAt}
         desk={selDesk}
         object={selObject}
         people={people}
-        onClose={() => { setSelection(null); setAnchorRect(null); }}
+        onClose={() => setMenuAt(null)}
         onEditDesk={editDesk}
         onEditObject={editObject}
         onRemove={removeSelected}
@@ -429,7 +448,7 @@ function Slider({
     <div>
       <div className="mb-1.5 flex items-baseline justify-between">
         <label className="text-xs font-medium text-muted">{label}</label>
-        <span className="font-mono text-[11px] text-muted tabular-nums">{Math.round(value)}{unit}</span>
+        <span className="text-[11px] text-muted tabular-nums">{Math.round(value)}{unit}</span>
       </div>
       <input
         type="range" min={min} max={max} step={step} value={value}

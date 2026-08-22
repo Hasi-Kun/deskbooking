@@ -8,15 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..config import settings
-from ..models import User, RefreshToken, AuditLog, Role
+from ..models import User, RefreshToken, AuditLog, Role, BackupCode
 from ..schemas import (
     LoginRequest, UserOut, ChangePasswordRequest, UserStatusOut,
-    TotpSetupResponse, TotpVerifyRequest, TotpDisableRequest,
+    TotpSetupResponse, TotpVerifyRequest, TotpDisableRequest, BackupCodesResponse,
+    NameStyleUpdate,
 )
 from ..security import (
     verify_password, hash_password, create_access_token,
     generate_refresh_token, hash_refresh_token,
     generate_totp_secret, totp_provisioning_uri, verify_totp,
+    generate_backup_codes, hash_backup_code,
 )
 from ..deps import get_current_user, verify_csrf
 
@@ -82,7 +84,23 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
                 "Bestaetigungscode aus deiner Authenticator-App erforderlich",
                 headers={"X-2FA-Required": "1"},
             )
-        if not verify_totp(user.totp_secret or "", payload.totp_code):
+        code_ok = verify_totp(user.totp_secret or "", payload.totp_code)
+
+        # Alternativ ein Einmal-Code (Format XXXX-XXXX), falls das Telefon fehlt.
+        if not code_ok:
+            candidate = await db.scalar(
+                select(BackupCode).where(
+                    BackupCode.user_id == user.id,
+                    BackupCode.code_hash == hash_backup_code(payload.totp_code),
+                    BackupCode.used_at.is_(None),
+                )
+            )
+            if candidate:
+                candidate.used_at = datetime.now(timezone.utc)
+                code_ok = True
+                await _log(db, user.id, "login_backup_code_used", request)
+
+        if not code_ok:
             user.failed_login_attempts += 1
             if user.failed_login_attempts >= settings.MAX_FAILED_LOGINS:
                 user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=settings.LOCKOUT_MINUTES)
@@ -173,8 +191,13 @@ async def change_password(payload: ChangePasswordRequest, request: Request,
 # ---------------- Zwei-Faktor-Authentifizierung ----------------
 
 @router.get("/status", response_model=UserStatusOut)
-async def auth_status(user: User = Depends(get_current_user)):
-    return user
+async def auth_status(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    remaining = await db.scalars(
+        select(BackupCode).where(BackupCode.user_id == user.id, BackupCode.used_at.is_(None))
+    )
+    out = UserStatusOut.model_validate(user)
+    out.backup_codes_remaining = len(remaining.all())
+    return out
 
 
 @router.post("/2fa/setup", response_model=TotpSetupResponse, dependencies=[Depends(verify_csrf)])
@@ -202,8 +225,11 @@ async def totp_verify(payload: TotpVerifyRequest, request: Request,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Code ist ungültig oder abgelaufen")
     user.totp_enabled = True
     await db.commit()
+    # Direkt einen Satz Einmal-Codes mitgeben - genau jetzt ist der richtige
+    # Moment, sie zu sichern.
+    codes = await _issue_backup_codes(db, user)
     await _log(db, user.id, "2fa_enabled", request)
-    return {"ok": True}
+    return {"ok": True, "backup_codes": codes}
 
 
 @router.post("/2fa/disable", dependencies=[Depends(verify_csrf)])
@@ -215,6 +241,47 @@ async def totp_disable(payload: TotpDisableRequest, request: Request,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Passwort ist falsch")
     user.totp_enabled = False
     user.totp_secret = None
+    stale = await db.scalars(select(BackupCode).where(BackupCode.user_id == user.id))
+    for c in stale.all():
+        await db.delete(c)
     await db.commit()
     await _log(db, user.id, "2fa_disabled", request)
     return {"ok": True}
+
+
+async def _issue_backup_codes(db: AsyncSession, user: User) -> list[str]:
+    """Erzeugt einen frischen Satz und verwirft alle bisherigen Codes."""
+    old = await db.scalars(select(BackupCode).where(BackupCode.user_id == user.id))
+    for c in old.all():
+        await db.delete(c)
+    codes = generate_backup_codes()
+    for code in codes:
+        db.add(BackupCode(user_id=user.id, code_hash=hash_backup_code(code)))
+    await db.commit()
+    return codes
+
+
+@router.post("/2fa/backup-codes", response_model=BackupCodesResponse,
+              dependencies=[Depends(verify_csrf)])
+async def regenerate_backup_codes(request: Request, user: User = Depends(get_current_user),
+                                   db: AsyncSession = Depends(get_db)):
+    """Neuen Satz Einmal-Codes erzeugen. Bisherige verlieren dabei ihre
+    Gueltigkeit - so kann ein alter, evtl. kompromittierter Zettel nicht
+    weiterverwendet werden."""
+    if not user.totp_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                             "Zuerst Zwei-Faktor-Authentifizierung aktivieren")
+    codes = await _issue_backup_codes(db, user)
+    await _log(db, user.id, "backup_codes_generated", request)
+    return BackupCodesResponse(codes=codes)
+
+
+@router.put("/name-style", response_model=UserOut, dependencies=[Depends(verify_csrf)])
+async def set_name_style(payload: NameStyleUpdate, user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """Rein kosmetisch - jede:r stellt den eigenen Stil selbst ein."""
+    user.name_style = payload.name_style
+    user.name_style_color = payload.name_style_color
+    await db.commit()
+    await db.refresh(user)
+    return user

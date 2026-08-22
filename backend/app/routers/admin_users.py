@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User, Role, RefreshToken
+from ..models import User, Role, RefreshToken, BackupCode
 from ..schemas import UserOut, AdminUserCreate, UserStatusOut, RoleUpdate, PasswordResetRequest
 from ..security import hash_password
 from ..deps import require_admin, verify_csrf
@@ -103,5 +103,9 @@ async def admin_disable_2fa(user_id: str, admin: User = Depends(require_admin),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Nutzer nicht gefunden")
     user.totp_enabled = False
     user.totp_secret = None
+    # Einmal-Codes gehoeren zum zweiten Faktor - beim Zuruecksetzen mit entfernen.
+    stale = await db.scalars(select(BackupCode).where(BackupCode.user_id == user_id))
+    for c in stale.all():
+        await db.delete(c)
     await db.commit()
     return {"ok": True}

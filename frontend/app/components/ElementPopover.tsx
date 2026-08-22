@@ -1,13 +1,13 @@
 "use client";
 import { AdminUser, Desk, SceneObject } from "@/lib/api";
-import AnchoredPopover from "./ui/AnchoredPopover";
+import PointerPopover from "./ui/PointerPopover";
 import { GlowCard, CardHeader, CardBody, CardFooter } from "./ui/GlowCard";
 import { ObjectIcon, OBJECT_LABELS } from "./SceneIcons";
 import Button from "./ui/Button";
 import Checkbox from "./ui/Checkbox";
 
 type Props = {
-  anchor: DOMRect | null;
+  at: { x: number; y: number } | null;
   desk: Desk | null;
   object: SceneObject | null;
   people: AdminUser[];
@@ -20,12 +20,12 @@ type Props = {
 /** Bearbeitungs-Panel des Editors - erscheint direkt neben dem angeklickten
  *  Element statt in einer festen Spalte am Bildschirmrand. */
 export default function ElementPopover({
-  anchor, desk, object, people, onClose, onEditDesk, onEditObject, onRemove,
+  at, desk, object, people, onClose, onEditDesk, onEditObject, onRemove,
 }: Props) {
-  if (!anchor || (!desk && !object)) return null;
+  if (!at || (!desk && !object)) return null;
 
   return (
-    <AnchoredPopover anchor={anchor} onClose={onClose} width={272}>
+    <PointerPopover at={at} onClose={onClose} width={268}>
       <GlowCard>
         <CardHeader
           icon={desk ? <DeskGlyph /> : <ObjectIcon kind={object!.kind} size={18} />}
@@ -46,7 +46,7 @@ export default function ElementPopover({
                 <input
                   key={desk.id + "n"} defaultValue={desk.name}
                   onBlur={(e) => e.target.value !== desk.name && onEditDesk(desk.id, { name: e.target.value })}
-                  className="w-full rounded-lg border border-line bg-raised px-3 py-2 font-mono text-sm focus-ring"
+                  className="w-full rounded-lg border border-line bg-raised px-3 py-2 text-sm tabular-nums focus-ring"
                 />
               </Field>
               <Field label="Zone">
@@ -54,6 +54,17 @@ export default function ElementPopover({
                   key={desk.id + "z"} defaultValue={desk.zone} placeholder="z. B. Fensterplatz"
                   onBlur={(e) => e.target.value !== desk.zone && onEditDesk(desk.id, { zone: e.target.value })}
                   className="w-full rounded-lg border border-line bg-raised px-3 py-2 text-sm focus-ring"
+                />
+              </Field>
+              <Field label="Kapazität" hint="1 = Einzelplatz, mehr = Konferenztisch">
+                <input
+                  key={desk.id + "cap"} type="number" min={1} max={30}
+                  defaultValue={desk.capacity}
+                  onBlur={(e) => {
+                    const v = Math.max(1, Math.min(30, Number(e.target.value) || 1));
+                    if (v !== desk.capacity) onEditDesk(desk.id, { capacity: v });
+                  }}
+                  className="w-full rounded-lg border border-line bg-raised px-3 py-2 text-sm tabular-nums focus-ring"
                 />
               </Field>
               <Field label="Fest zugewiesen an">
@@ -119,14 +130,17 @@ export default function ElementPopover({
           </Button>
         </CardFooter>
       </GlowCard>
-    </AnchoredPopover>
+    </PointerPopover>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[11px] font-medium text-muted">{label}</label>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <label className="text-[11px] font-medium text-muted">{label}</label>
+        {hint && <span className="text-[10px] text-muted/70">{hint}</span>}
+      </div>
       {children}
     </div>
   );
@@ -142,7 +156,7 @@ function Slider({
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <label className="text-[11px] font-medium text-muted">{label}</label>
-        <span className="font-mono text-[11px] tabular-nums text-muted">{Math.round(value)}{unit}</span>
+        <span className="text-[11px] tabular-nums text-muted">{Math.round(value)}{unit}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
              onChange={(e) => onChange(+e.target.value)}

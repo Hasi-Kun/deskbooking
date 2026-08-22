@@ -21,24 +21,28 @@ DEFAULTS = {
     "gradient_from": lambda: settings.GRADIENT_FROM,
     "gradient_mid": lambda: settings.GRADIENT_MID,
     "gradient_to": lambda: settings.GRADIENT_TO,
+    "gradient_enabled": lambda: "1" if settings.GRADIENT_ENABLED else "0",
     "ambient_color": lambda: settings.AMBIENT_COLOR,
     "logo_url": lambda: settings.LOGO_URL,
     "support_contact": lambda: settings.SUPPORT_CONTACT,
 }
 
 COLOR_KEYS = {"primary_color", "gradient_from", "gradient_mid", "gradient_to", "ambient_color"}
+BOOL_KEYS = {"gradient_enabled"}
 
 
-async def load_appearance(db: AsyncSession) -> dict[str, str]:
+async def load_appearance(db: AsyncSession) -> dict[str, object]:
     """Liest die Einstellungen: Datenbank schlaegt .env, .env schlaegt Vorgabe."""
     rows = await db.scalars(select(AppSetting))
     stored = {r.key: r.value for r in rows.all()}
-    out: dict[str, str] = {}
+    out: dict[str, object] = {}
     for key, default in DEFAULTS.items():
         value = stored.get(key)
         # Leerer String ist bei optionalen Feldern (gradient_mid, logo_url) ein
         # gueltiger Wert - deshalb "is not None" statt Truthiness.
-        out[key] = value if value is not None else (default() or "")
+        raw = value if value is not None else (default() or "")
+        # In der Tabelle stehen nur Strings; Schalter wieder zu bool wandeln.
+        out[key] = (raw == "1") if key in BOOL_KEYS else raw
     return out
 
 
@@ -53,7 +57,11 @@ async def update_appearance(payload: AppearanceUpdate, admin: User = Depends(req
     for key, value in payload.model_dump(exclude_unset=True).items():
         if value is None:
             continue
-        value = value.strip()
+        # Schalter kommen als bool herein, werden aber als "0"/"1" abgelegt.
+        if key in BOOL_KEYS:
+            value = "1" if value else "0"
+        else:
+            value = str(value).strip()
         # Farbwerte defensiv pruefen - der Wert landet spaeter als CSS-Variable
         # im Browser, ungueltige Eingaben wuerden dort still das Layout brechen.
         if key in COLOR_KEYS and value and not HEX.match(value):

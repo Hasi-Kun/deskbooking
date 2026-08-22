@@ -2,7 +2,12 @@
 import { ObjectKind } from "@/lib/api";
 import { ObjectIcon, OBJECT_LABELS, DeskIcon } from "./SceneIcons";
 
-export type PaletteItem = { kind: "desk" } | { kind: "object"; objectKind: ObjectKind };
+/** "desk" mit variant "meeting" legt denselben buchbaren Platz an, nur mit
+ *  Standard-Kapazität >1 und größerer Kachel - ein echter, buchbarer
+ *  Konferenztisch statt der reinen Deko-Einrichtung weiter unten. */
+export type PaletteItem =
+  | { kind: "desk"; variant?: "single" | "meeting" }
+  | { kind: "object"; objectKind: ObjectKind };
 
 const OBJECT_ORDER: ObjectKind[] = [
   "wall", "door", "window", "plant", "cabinet", "meeting_table", "label",
@@ -26,17 +31,32 @@ export default function InventoryPalette({ wallMode, onToggleWallMode }: Props) 
     <aside className="rounded-xl2 border border-line bg-surface p-3 space-y-4">
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Arbeitsplatz</p>
-        <div
-          draggable
-          onDragStart={(e) => startDrag(e, { kind: "desk" })}
-          className="group/item flex items-center gap-2.5 rounded-lg border border-line p-2.5
-                     cursor-grab active:cursor-grabbing hover:border-accent/50 hover:bg-raised
-                     transition-all duration-200"
-        >
-          <span className="text-accent transition-transform duration-200 group-hover/item:scale-110">
-            <DeskIcon />
-          </span>
-          <span className="text-sm">Tisch</span>
+        <div className="space-y-1.5">
+          <div
+            draggable
+            onDragStart={(e) => startDrag(e, { kind: "desk", variant: "single" })}
+            className="group/item flex items-center gap-2.5 rounded-lg border border-line p-2.5
+                       cursor-grab active:cursor-grabbing hover:border-accent/50 hover:bg-raised
+                       transition-all duration-200"
+          >
+            <span className="text-accent transition-transform duration-200 group-hover/item:scale-110">
+              <DeskIcon />
+            </span>
+            <span className="text-sm">Tisch</span>
+          </div>
+          <div
+            draggable
+            onDragStart={(e) => startDrag(e, { kind: "desk", variant: "meeting" })}
+            title="Buchbarer Tisch mit mehreren Plätzen (Gruppenbuchung)"
+            className="group/item flex items-center gap-2.5 rounded-lg border border-line p-2.5
+                       cursor-grab active:cursor-grabbing hover:border-accent/50 hover:bg-raised
+                       transition-all duration-200"
+          >
+            <span className="text-accent transition-transform duration-200 group-hover/item:scale-110">
+              <ObjectIcon kind="meeting_table" />
+            </span>
+            <span className="text-sm">Konferenztisch</span>
+          </div>
         </div>
       </div>
 
@@ -88,7 +108,9 @@ export default function InventoryPalette({ wallMode, onToggleWallMode }: Props) 
 
       <p className="text-[11px] text-muted leading-snug border-t border-line pt-3">
         Elemente aus der Leiste auf den Grundriss ziehen. Platzierte Objekte lassen sich
-        anschließend verschieben und im Detail-Panel anpassen.
+        anschließend verschieben und im Detail-Panel anpassen. <strong className="text-ink/70 font-medium">
+        Nur Elemente unter „Arbeitsplatz“ sind buchbar</strong> - Einrichtung wie der
+        Besprechungstisch ist reine Deko fürs Layout.
       </p>
     </aside>
   );

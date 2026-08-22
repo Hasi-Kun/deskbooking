@@ -2,17 +2,28 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { api, ApiError, User } from "@/lib/api";
+import { api, ApiError, Passkey, User } from "@/lib/api";
 import AppShell from "../components/AppShell";
+import { useAppData } from "../components/AppDataProvider";
 import Button from "../components/ui/Button";
 import Dialog from "../components/ui/Dialog";
+import AlertDialog from "../components/ui/AlertDialog";
+import ColorPicker from "../components/ui/ColorPicker";
+import StyledName from "../components/StyledName";
+import { isWebAuthnSupported, createPasskey } from "@/lib/webauthn";
 import { Skeleton } from "../components/ui/Skeleton";
 
-type Status = User & { is_active: boolean; totp_enabled: boolean };
+type Status = User & { is_active: boolean; totp_enabled: boolean; backup_codes_remaining?: number };
 
 export default function AccountPage() {
   const router = useRouter();
-  const [status, setStatus] = useState<Status | null>(null);
+  const { data } = useAppData();
+  // Aus dem Cache vorbefüllen (nur für Name/Rolle, die AppShell fürs Menü
+  // braucht) - die restlichen Felder (2FA-Status etc.) kommen gleich darauf
+  // über den eigenen /api/auth/status-Aufruf und überschreiben diesen Platzhalter.
+  const [status, setStatus] = useState<Status | null>(
+    data.user ? { ...data.user, is_active: true, totp_enabled: false } : null
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -24,17 +35,93 @@ export default function AccountPage() {
   // 2FA-Einrichtung
   const [setup, setSetup] = useState<{ provisioning_uri: string; secret: string } | null>(null);
   const [code, setCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  // Zwischenspeicher zwischen Browser-Bestaetigung und Namensvergabe:
+  // token/credential kommen vom WebAuthn-Schritt, der Name wird erst danach
+  // im Dialog erfragt (statt per window.prompt).
+  const [pendingPasskey, setPendingPasskey] = useState<{ token: string; credential: any } | null>(null);
+  const [passkeyNickname, setPasskeyNickname] = useState("");
+  const [nameStyle, setNameStyle] = useState("plain");
+  const [nameStyleColor, setNameStyleColor] = useState("#35E0C0");
   const [disableOpen, setDisableOpen] = useState(false);
   const [disablePw, setDisablePw] = useState("");
 
   async function reload() {
-    setStatus(await api<Status>("/api/auth/status"));
+    const s = await api<Status>("/api/auth/status");
+    setStatus(s);
+    setNameStyle(s.name_style || "plain");
+    setNameStyleColor(s.name_style_color || "#35E0C0");
+    return s;
+  }
+
+  async function reloadPasskeys() {
+    setPasskeys(await api<Passkey[]>("/api/auth/webauthn"));
   }
 
   useEffect(() => {
-    reload().catch(() => router.replace("/login")).finally(() => setLoading(false));
+    Promise.all([reload(), reloadPasskeys()])
+      .catch(() => router.replace("/login"))
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function addPasskey() {
+    setPasskeyBusy(true);
+    setError(null);
+    try {
+      const { token, options } = await api<{ token: string; options: any }>(
+        "/api/auth/webauthn/register/options", { method: "POST" }
+      );
+      const credential = await createPasskey(options);
+      // Browser-Bestätigung ist durch - jetzt den Namen erfragen (Dialog statt window.prompt)
+      setPendingPasskey({ token, credential });
+      setPasskeyNickname("");
+    } catch (e: any) {
+      if (e?.name !== "NotAllowedError") setError(e?.message || "Passkey konnte nicht hinzugefügt werden");
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function confirmPasskeyNickname() {
+    if (!pendingPasskey) return;
+    setPasskeyBusy(true);
+    try {
+      await api("/api/auth/webauthn/register/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          token: pendingPasskey.token, credential: pendingPasskey.credential,
+          nickname: passkeyNickname.trim() || "Passkey",
+        }),
+      });
+      await reloadPasskeys();
+      setNotice("Passkey hinzugefügt");
+      setPendingPasskey(null);
+    } catch (e: any) {
+      setError(e?.message || "Passkey konnte nicht gespeichert werden");
+      setPendingPasskey(null);
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function removePasskey(id: string) {
+    if (!confirm("Diesen Passkey entfernen?")) return;
+    await api(`/api/auth/webauthn/${id}`, { method: "DELETE" });
+    await reloadPasskeys();
+  }
+
+  async function saveNameStyle(style: string, color: string) {
+    setNameStyle(style);
+    setNameStyleColor(color);
+    try {
+      await api("/api/auth/name-style", {
+        method: "PUT", body: JSON.stringify({ name_style: style, name_style_color: color }),
+      });
+    } catch (e) { /* stumm - rein kosmetisch, kein Blocker */ }
+  }
 
   async function act(fn: () => Promise<void>, ok?: string) {
     setBusy(true); setError(null); setNotice(null);
@@ -48,7 +135,7 @@ export default function AccountPage() {
   }
 
   if (loading) {
-    return <AppShell user={null}><Skeleton className="h-64 w-full rounded-xl2" /></AppShell>;
+    return <AppShell user={status}><Skeleton className="h-64 w-full rounded-xl2" /></AppShell>;
   }
 
   return (
@@ -111,9 +198,29 @@ export default function AccountPage() {
           </div>
 
           {status?.totp_enabled ? (
-            <Button className="mt-3" variant="danger" onClick={() => setDisableOpen(true)}>
-              Zwei-Faktor deaktivieren
-            </Button>
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-muted">
+                Einmal-Codes übrig: <span className="text-ink tabular-nums">
+                  {status.backup_codes_remaining ?? 0}
+                </span>
+                {(status.backup_codes_remaining ?? 0) <= 2 && (
+                  <span className="ml-1 text-danger">– neue erzeugen empfohlen</span>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" loading={busy}
+                        onClick={() => act(async () => {
+                          const res = await api<{ codes: string[] }>("/api/auth/2fa/backup-codes",
+                                                                     { method: "POST" });
+                          setBackupCodes(res.codes);
+                        }, "Neue Einmal-Codes erzeugt – alte sind ungültig")}>
+                  Neue Einmal-Codes
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => setDisableOpen(true)}>
+                  Zwei-Faktor deaktivieren
+                </Button>
+              </div>
+            </div>
           ) : setup ? (
             <div className="mt-4 space-y-4 animate-fade-in">
               <ol className="space-y-3 text-sm">
@@ -130,7 +237,7 @@ export default function AccountPage() {
                   <Step n={2} />
                   <div className="min-w-0">
                     <p>Falls Scannen nicht geht, Schlüssel manuell eintragen:</p>
-                    <code className="mt-1 block break-all rounded-md bg-raised px-2 py-1.5 font-mono text-xs">
+                    <code className="mt-1 block break-all rounded-md bg-raised px-2 py-1.5 text-xs tabular-nums">
                       {setup.secret}
                     </code>
                   </div>
@@ -145,12 +252,14 @@ export default function AccountPage() {
                         onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                         inputMode="numeric" placeholder="123456"
                         className="w-32 rounded-lg border border-line bg-surface px-3 py-2 text-center
-                                   font-mono text-lg tracking-[0.3em] focus-ring"
+                                   text-lg tracking-[0.3em] tabular-nums focus-ring"
                       />
                       <Button variant="primary" loading={busy} disabled={code.length !== 6}
                               onClick={() => act(async () => {
-                                await api("/api/auth/2fa/verify", { method: "POST", body: JSON.stringify({ code }) });
+                                const res = await api<{ ok: boolean; backup_codes?: string[] }>(
+                                  "/api/auth/2fa/verify", { method: "POST", body: JSON.stringify({ code }) });
                                 setSetup(null); setCode("");
+                                if (res.backup_codes) setBackupCodes(res.backup_codes);
                               }, "Zwei-Faktor ist jetzt aktiv")}>
                         Bestätigen
                       </Button>
@@ -171,7 +280,110 @@ export default function AccountPage() {
             </Button>
           )}
         </section>
+
+        {/* Passkeys */}
+        <section className="rounded-xl2 border border-line bg-surface p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Passkeys</h2>
+              <p className="mt-1 text-sm text-muted">
+                Anmelden mit Touch ID, Windows Hello oder einem Sicherheitsschlüssel
+                (z. B. YubiKey) — ohne Passwort, phishing-sicher.
+              </p>
+            </div>
+          </div>
+
+          {passkeys.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {passkeys.map((pk) => (
+                <li key={pk.id} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{pk.nickname}</p>
+                    <p className="text-[11px] text-muted">
+                      {pk.device_type === "platform" ? "Geräteintern" : "Sicherheitsschlüssel"}
+                      {pk.last_used_at && ` · zuletzt genutzt ${new Date(pk.last_used_at).toLocaleDateString("de-DE")}`}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="danger" onClick={() => removePasskey(pk.id)}>Entfernen</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {isWebAuthnSupported() ? (
+            <Button className="mt-3" variant="primary" loading={passkeyBusy} onClick={addPasskey}>
+              Passkey hinzufügen
+            </Button>
+          ) : (
+            <p className="mt-3 text-xs text-muted">Dieser Browser unterstützt keine Passkeys.</p>
+          )}
+        </section>
+
+        {/* Namens-Stil */}
+        <section className="rounded-xl2 border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Anzeige-Stil</h2>
+          <p className="mt-1 text-sm text-muted">Wie dein Name für andere im Grundriss erscheint.</p>
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => saveNameStyle("plain", nameStyleColor)}
+              className={[
+                "rounded-lg border px-3 py-1.5 text-sm transition-colors focus-ring",
+                nameStyle === "plain" ? "border-accent/50 text-ink" : "border-line text-muted hover:bg-raised",
+              ].join(" ")}
+            >
+              Normal
+            </button>
+            <button
+              onClick={() => saveNameStyle("glitter", nameStyleColor)}
+              className={[
+                "rounded-lg border px-3 py-1.5 text-sm transition-colors focus-ring",
+                nameStyle === "glitter" ? "border-accent/50 text-ink" : "border-line text-muted hover:bg-raised",
+              ].join(" ")}
+            >
+              Glitzer
+            </button>
+          </div>
+
+          {nameStyle === "glitter" && (
+            <div className="mt-3 max-w-[200px] animate-fade-in">
+              <ColorPicker label="Farbe" value={nameStyleColor}
+                           onChange={(c) => saveNameStyle("glitter", c)} />
+            </div>
+          )}
+
+          <div className="mt-3">
+            <p className="mb-1.5 text-[11px] font-medium text-muted">Vorschau</p>
+            <StyledName name={status?.full_name || "Name"} style={nameStyle} color={nameStyleColor} />
+          </div>
+        </section>
       </div>
+
+      {/* Einmal-Codes: werden genau einmal im Klartext gezeigt */}
+      {backupCodes && (
+        <section className="rounded-xl2 border border-accent/40 bg-surface p-4 animate-fade-in">
+          <h2 className="text-sm font-semibold">Deine Einmal-Codes</h2>
+          <p className="mt-1 text-sm text-muted">
+            Jetzt sichern – sie werden <strong>nur dieses eine Mal</strong> angezeigt. Jeder Code
+            funktioniert einmal und ersetzt den Authenticator, falls du dein Telefon nicht hast.
+          </p>
+          <ul className="mt-3 grid grid-cols-2 gap-1.5">
+            {backupCodes.map((c) => (
+              <li key={c} className="rounded-md bg-raised px-2.5 py-1.5 text-center text-sm tracking-wider tabular-nums">
+                {c}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={() => navigator.clipboard?.writeText(backupCodes.join("\n"))}>
+              Kopieren
+            </Button>
+            <Button size="sm" variant="primary" onClick={() => setBackupCodes(null)}>
+              Ich habe sie gesichert
+            </Button>
+          </div>
+        </section>
+      )}
 
       <Dialog
         open={disableOpen}
@@ -193,6 +405,26 @@ export default function AccountPage() {
       >
         <Input label="Passwort" type="password" value={disablePw} onChange={setDisablePw} />
       </Dialog>
+
+      <AlertDialog
+        open={!!pendingPasskey}
+        title="Sicherheitsschlüssel benennen"
+        description="Vergib einen Namen, damit du ihn später wiedererkennst – zum Beispiel „YubiKey Büro“ oder „Touch ID Laptop“."
+        actionLabel="Speichern"
+        actionBusy={passkeyBusy}
+        actionDisabled={!passkeyNickname.trim()}
+        onAction={confirmPasskeyNickname}
+        cancelLabel="Verwerfen"
+        onCancel={() => setPendingPasskey(null)}
+      >
+        <input
+          autoFocus value={passkeyNickname}
+          onChange={(e) => setPasskeyNickname(e.target.value.slice(0, 64))}
+          onKeyDown={(e) => { if (e.key === "Enter" && passkeyNickname.trim()) confirmPasskeyNickname(); }}
+          placeholder="z. B. YubiKey Büro"
+          className="w-full rounded-lg bg-raised px-3 py-2 text-sm placeholder:text-muted/60 focus-ring"
+        />
+      </AlertDialog>
     </AppShell>
   );
 }

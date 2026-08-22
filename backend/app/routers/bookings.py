@@ -6,20 +6,69 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import Booking, Desk, User, BookingStatus, AuditLog
-from ..schemas import BookingCreate, BookingOut, BookingRangeCreate
+from ..models import Booking, Desk, User, BookingStatus, BookingSlot, BookingAttendee, AuditLog
+from ..schemas import BookingCreate, BookingOut, BookingRangeCreate, AttendeeOut
 from ..deps import get_current_user, verify_csrf
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
 
+def _parse_slot(value: str) -> BookingSlot:
+    try:
+        return BookingSlot(value)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                             "Zeitfenster muss full, morning oder afternoon sein")
+
+
+def _conflicting_slots(slot: BookingSlot) -> list[BookingSlot]:
+    """Welche vorhandenen Zeitfenster blockieren das gewuenschte?
+    Ganztags kollidiert mit allem; ein Halbtag mit sich selbst und mit ganztags."""
+    if slot == BookingSlot.full:
+        return [BookingSlot.full, BookingSlot.morning, BookingSlot.afternoon]
+    return [BookingSlot.full, slot]
+
+
+SLOT_LABEL = {
+    BookingSlot.full: "ganztags",
+    BookingSlot.morning: "vormittags",
+    BookingSlot.afternoon: "nachmittags",
+}
+
+
 def _to_out(b: Booking) -> BookingOut:
+    attendees = [
+        AttendeeOut(id=a.user.id, full_name=a.user.full_name,
+                    name_style=a.user.name_style, name_style_color=a.user.name_style_color)
+        for a in (b.attendees or [])
+    ]
     return BookingOut(
         id=b.id, desk_id=b.desk_id, desk_name=b.desk.name,
         user_id=b.user_id, user_name=b.user.full_name,
+        user_name_style=b.user.name_style, user_name_style_color=b.user.name_style_color,
         booking_date=b.booking_date, status=b.status.value,
-        comment=b.comment or "", created_at=b.created_at,
+        slot=b.slot.value if b.slot else "full",
+        comment=b.comment or "", attendees=attendees, created_at=b.created_at,
     )
+
+
+async def _resolve_attendees(db: AsyncSession, desk: Desk, booker_id: str, attendee_ids: list[str]) -> list[User]:
+    """Prueft und laedt die zusaetzlichen Teilnehmenden einer Gruppenbuchung.
+    Nur fuer Tische mit Kapazitaet > 1 relevant - ein normaler Einzelplatz
+    ignoriert eine evtl. mitgeschickte Liste ohnehin (siehe Aufrufer)."""
+    ids = [i for i in dict.fromkeys(attendee_ids) if i and i != booker_id]  # Duplikate + Booker selbst raus
+    if not ids:
+        return []
+    if len(ids) + 1 > desk.capacity:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"„{desk.name}“ bietet Platz für {desk.capacity} Personen, {len(ids) + 1} wurden angegeben",
+        )
+    rows = await db.scalars(select(User).where(User.id.in_(ids), User.is_active.is_(True)))
+    users = list(rows.all())
+    if len(users) != len(ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mindestens ein ausgewählter Teilnehmer wurde nicht gefunden")
+    return users
 
 
 @router.get("", response_model=list[BookingOut])
@@ -33,7 +82,10 @@ async def list_bookings(
     date_to = date_to or (date_from + timedelta(days=6))
     stmt = (
         select(Booking)
-        .options(selectinload(Booking.desk), selectinload(Booking.user))
+        .options(
+            selectinload(Booking.desk), selectinload(Booking.user),
+            selectinload(Booking.attendees).selectinload(BookingAttendee.user),
+        )
         .where(
             Booking.status == BookingStatus.confirmed,
             Booking.booking_date >= date_from,
@@ -48,7 +100,10 @@ async def list_bookings(
 async def my_bookings(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     stmt = (
         select(Booking)
-        .options(selectinload(Booking.desk), selectinload(Booking.user))
+        .options(
+            selectinload(Booking.desk), selectinload(Booking.user),
+            selectinload(Booking.attendees).selectinload(BookingAttendee.user),
+        )
         .where(Booking.user_id == user.id, Booking.status == BookingStatus.confirmed,
                Booking.booking_date >= date.today())
         .order_by(Booking.booking_date)
@@ -69,19 +124,45 @@ async def create_booking(payload: BookingCreate, request: Request,
     if desk.fixed_user_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist fest zugewiesen und nicht buchbar")
 
-    # Ein Nutzer darf pro Tag nur einen aktiven Platz haben
-    existing = await db.scalar(
+    slot = _parse_slot(payload.slot)
+    blocking = _conflicting_slots(slot)
+
+    # Ist der Platz im gewuenschten Zeitfenster schon vergeben?
+    taken = await db.scalar(
+        select(Booking).where(
+            Booking.desk_id == desk.id,
+            Booking.booking_date == payload.booking_date,
+            Booking.status == BookingStatus.confirmed,
+            Booking.slot.in_(blocking),
+        )
+    )
+    if taken:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Dieser Platz ist an dem Tag bereits {SLOT_LABEL[taken.slot]} belegt",
+        )
+
+    # Ein Nutzer darf sich nicht selbst doppelt einbuchen (gleiches Zeitfenster).
+    own = await db.scalar(
         select(Booking).where(
             Booking.user_id == user.id,
             Booking.booking_date == payload.booking_date,
             Booking.status == BookingStatus.confirmed,
+            Booking.slot.in_(blocking),
         )
     )
-    if existing:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Du hast für diesen Tag bereits einen Platz gebucht")
+    if own:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Du hast für diesen Tag bereits {SLOT_LABEL[own.slot]} einen Platz gebucht",
+        )
+
+    # Zusaetzliche Teilnehmende validieren, BEVOR die Buchung angelegt wird -
+    # so entsteht bei einem ungueltigen Teilnehmer keine halbe Buchung.
+    attendees = await _resolve_attendees(db, desk, user.id, payload.attendee_ids)
 
     booking = Booking(desk_id=desk.id, user_id=user.id, booking_date=payload.booking_date,
-                       comment=payload.comment.strip())
+                       slot=slot, comment=payload.comment.strip())
     db.add(booking)
     try:
         await db.commit()
@@ -89,7 +170,12 @@ async def create_booking(payload: BookingCreate, request: Request,
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist für den gewählten Tag bereits belegt")
 
-    await db.refresh(booking, attribute_names=["desk", "user"])
+    for a in attendees:
+        db.add(BookingAttendee(booking_id=booking.id, user_id=a.id))
+    if attendees:
+        await db.commit()
+
+    await db.refresh(booking, attribute_names=["desk", "user", "attendees"])
     db.add(AuditLog(user_id=user.id, action="booking_create", entity="booking", entity_id=booking.id,
                      ip_address=request.client.host if request.client else ""))
     await db.commit()
@@ -131,6 +217,10 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
     if desk.fixed_user_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist fest zugewiesen und nicht buchbar")
 
+    slot = _parse_slot(payload.slot)
+    blocking = _conflicting_slots(slot)
+    attendees = await _resolve_attendees(db, desk, user.id, payload.attendee_ids)
+
     today = date.today()
     created: list[str] = []
     skipped: list[str] = []
@@ -146,16 +236,22 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
             select(Booking).where(
                 Booking.booking_date == current,
                 Booking.status == BookingStatus.confirmed,
+                Booking.slot.in_(blocking),
                 or_(Booking.desk_id == desk.id, Booking.user_id == user.id),
             )
         )
         if clash:
             skipped.append(current.isoformat())
         else:
-            db.add(Booking(desk_id=desk.id, user_id=user.id, booking_date=current,
-                           comment=payload.comment.strip()))
+            booking = Booking(desk_id=desk.id, user_id=user.id, booking_date=current,
+                               slot=slot, comment=payload.comment.strip())
+            db.add(booking)
             try:
                 await db.commit()
+                for a in attendees:
+                    db.add(BookingAttendee(booking_id=booking.id, user_id=a.id))
+                if attendees:
+                    await db.commit()
                 created.append(current.isoformat())
             except IntegrityError:
                 await db.rollback()

@@ -16,6 +16,14 @@ class Role(str, enum.Enum):
     admin = "admin"
 
 
+class BookingSlot(str, enum.Enum):
+    """Zeitfenster einer Buchung. "full" belegt den ganzen Tag und schliesst
+    beide Halbtage aus; "morning"/"afternoon" koennen sich zwei Personen teilen."""
+    full = "full"
+    morning = "morning"
+    afternoon = "afternoon"
+
+
 class BookingStatus(str, enum.Enum):
     confirmed = "confirmed"
     cancelled = "cancelled"
@@ -47,6 +55,10 @@ class User(Base):
     # damit sich niemand aussperrt, weil der Authenticator falsch eingerichtet war.
     totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # --- Namens-Stil (rein kosmetisch, z.B. Glitzer-Effekt) ---
+    name_style: Mapped[str] = mapped_column(String(20), default="plain")   # plain | glitter
+    name_style_color: Mapped[str] = mapped_column(String(7), default="#35E0C0")
 
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -91,6 +103,9 @@ class Desk(Base):
 
     floor: Mapped["Floor"] = relationship(back_populates="desks")
     fixed_user: Mapped["User | None"] = relationship(foreign_keys=[fixed_user_id])
+    # 1 = normaler Einzelplatz. >1 = Konferenztisch/Gruppenraum - eine Person
+    # bucht ihn und kann zusaetzliche Kolleg:innen als Teilnehmende angeben.
+    capacity: Mapped[int] = mapped_column(Integer, default=1)
     bookings: Mapped[list["Booking"]] = relationship(back_populates="desk", cascade="all, delete-orphan")
 
 
@@ -119,8 +134,11 @@ class SceneObject(Base):
 
 class Booking(Base):
     __tablename__ = "bookings"
+    # Ein Platz kann pro Tag zwei Halbtags-Buchungen haben, aber jedes
+    # Zeitfenster nur einmal. Dass "full" mit den Halbtagen kollidiert, laesst
+    # sich als Constraint nicht ausdruecken - das prueft der Router.
     __table_args__ = (
-        UniqueConstraint("desk_id", "booking_date", name="uq_desk_date_active"),
+        UniqueConstraint("desk_id", "booking_date", "slot", name="uq_desk_date_slot"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
@@ -128,11 +146,15 @@ class Booking(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     booking_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.confirmed)
+    slot: Mapped[BookingSlot] = mapped_column(Enum(BookingSlot), default=BookingSlot.full, nullable=False)
     comment: Mapped[str] = mapped_column(String(280), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     desk: Mapped["Desk"] = relationship(back_populates="bookings")
     user: Mapped["User"] = relationship(back_populates="bookings")
+    attendees: Mapped[list["BookingAttendee"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
 
 
 class RefreshToken(Base):
@@ -147,6 +169,96 @@ class RefreshToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     user_agent: Mapped[str] = mapped_column(String(255), default="")
     ip_address: Mapped[str] = mapped_column(String(64), default="")
+
+
+class BookingAttendee(Base):
+    """Zusaetzliche Teilnehmende einer Gruppenbuchung (Konferenztisch). Die
+    buchende Person selbst steht bereits in Booking.user_id - hier stehen nur
+    die WEITEREN Personen, die mit am Tisch sitzen."""
+    __tablename__ = "booking_attendees"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    booking_id: Mapped[str] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    # "selectin" statt dem Standard-Lazy-Loading: sonst funktioniert der
+    # Zugriff auf a.user nur zufaellig dann, wenn der betreffende User schon
+    # anderweitig in der Session-Identity-Map liegt (z.B. weil er kurz zuvor
+    # beim Anlegen der Buchung geladen wurde) - bei einer frischen Abfrage
+    # (z.B. GET /api/bookings) fehlt dieser Zufallstreffer und ein simpler
+    # Lazy-Load in async Kontext bricht mit MissingGreenlet ab.
+    user: Mapped["User"] = relationship(foreign_keys=[user_id], lazy="selectin")
+
+
+class Message(Base):
+    """Chat-Nachricht: entweder im globalen Kanal (channel="global",
+    recipient_id=None) oder als Direktnachricht (channel="dm",
+    recipient_id=<Empfaenger>). Ein Verlauf zwischen zwei Personen ergibt sich
+    aus (sender_id, recipient_id) in beiden Richtungen - kein eigenes
+    Konversations-Objekt noetig fuer diesen Umfang."""
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    channel: Mapped[str] = mapped_column(String(10), default="global", index=True)  # global | dm
+    sender_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    recipient_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    body: Mapped[str] = mapped_column(String(2000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    sender: Mapped["User"] = relationship(foreign_keys=[sender_id])
+    recipient: Mapped["User | None"] = relationship(foreign_keys=[recipient_id])
+
+
+class WebAuthnCredential(Base):
+    """Ein registrierter Passkey/Sicherheitsschluessel (YubiKey, Touch ID,
+    Windows Hello, ...). Der Public Key reicht zur Verifikation - private
+    Schluessel verlassen das Geraet der Person nie."""
+    __tablename__ = "webauthn_credentials"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Base64url-kodierte Credential-ID, wie sie der Browser/Authenticator liefert
+    credential_id: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    public_key: Mapped[str] = mapped_column(String(1024), nullable=False)   # Base64url (COSE-Key, DER)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Wie wurde registriert: "platform" (Touch ID/Windows Hello) oder "cross-platform" (YubiKey)
+    device_type: Mapped[str] = mapped_column(String(20), default="cross-platform")
+    backed_up: Mapped[bool] = mapped_column(Boolean, default=False)
+    nickname: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WebAuthnChallenge(Base):
+    """Kurzlebiger Zwischenspeicher fuer die WebAuthn-Challenge zwischen dem
+    "options"- und dem "verify"-Aufruf. HTTP ist zustandslos, der Browser
+    braucht die Challenge aber zwischen beiden Schritten unveraendert zurueck.
+    "token" identifiziert den Vorgang beim Login, wo der Nutzer noch nicht
+    angemeldet ist (daher user_id hier nullable)."""
+    __tablename__ = "webauthn_challenges"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    challenge: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)   # registration | authentication
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BackupCode(Base):
+    """Einmal-Codes als Ersatz fuer den Authenticator (verlorenes Telefon).
+    Gespeichert wird nur der Hash - im Klartext sieht der Nutzer sie genau
+    einmal bei der Erzeugung."""
+    __tablename__ = "backup_codes"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AuditLog(Base):

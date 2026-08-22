@@ -53,6 +53,11 @@ export default function SettingsMenu({ isAdmin }: { isAdmin: boolean }) {
     Object.entries(CSS_VAR).forEach(([key, cssVar]) => {
       root.style.setProperty(cssVar, (cfg as any)[key]);
     });
+    // Verlauf aus: alle Stufen auf den Akzent - alles wirkt einfarbig.
+    if (!cfg.gradient_enabled) {
+      ["--grad-from", "--grad-mid", "--grad-to"].forEach((v) =>
+        root.style.setProperty(v, cfg.primary_color));
+    }
   }
 
   function preview(patch: Partial<PublicConfig>) {
@@ -82,6 +87,7 @@ export default function SettingsMenu({ isAdmin }: { isAdmin: boolean }) {
           gradient_from: draft.gradient_from,
           gradient_mid: draft.gradient_mid,
           gradient_to: draft.gradient_to,
+          gradient_enabled: draft.gradient_enabled,
           ambient_color: draft.ambient_color,
         }),
       });
@@ -151,11 +157,18 @@ export default function SettingsMenu({ isAdmin }: { isAdmin: boolean }) {
                   <div className="space-y-1.5 border-t border-line pt-4">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Verlauf</p>
                     <div className="gradient-bar rounded-full" />
-                    <p className="text-[11px] leading-snug text-muted">
-                      Läuft von links nach rechts über drei Stufen.
-                    </p>
                   </div>
-                  <div className="grid grid-cols-1 gap-3">
+                  <Switch
+                    id="set-gradient"
+                    checked={draft.gradient_enabled}
+                    onChange={(v) => preview({ gradient_enabled: v })}
+                    label="Verlauf verwenden"
+                    hint={draft.gradient_enabled ? "drei Stufen, links nach rechts" : "einfarbig in Akzentfarbe"}
+                  />
+                  <div className={[
+                    "grid grid-cols-1 gap-3 transition-all duration-300",
+                    draft.gradient_enabled ? "opacity-100" : "pointer-events-none max-h-0 overflow-hidden opacity-0",
+                  ].join(" ")}>
                     <ColorPicker label="Links" hint="0 %" value={draft.gradient_from}
                                  onChange={(hex) => preview({ gradient_from: hex })} />
                     <ColorPicker label="Mitte" hint="50 %" value={draft.gradient_mid}

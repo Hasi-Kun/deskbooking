@@ -8,6 +8,7 @@ const defaultConfig: PublicConfig = {
   gradient_from: "#1E5799",
   gradient_mid: "#F300FF",
   gradient_to: "#E0FF00",
+  gradient_enabled: true,
   ambient_color: "#34D399",
   logo_url: "",
   support_contact: "",
@@ -37,9 +38,12 @@ function applyToDocument(cfg: PublicConfig) {
   root.style.setProperty("--accent-ink", contrastInk(cfg.primary_color));
   // Verlauf und Hintergrundschein sind eigenständig und folgen der
   // Akzentfarbe bewusst NICHT.
-  root.style.setProperty("--grad-from", cfg.gradient_from);
-  root.style.setProperty("--grad-mid", cfg.gradient_mid);
-  root.style.setProperty("--grad-to", cfg.gradient_to);
+  // Bei abgeschaltetem Verlauf werden alle drei Stufen auf den Akzent gesetzt -
+  // damit wirkt jede Verlaufsfläche einfarbig, ohne dass Markup nötig wäre.
+  const on = cfg.gradient_enabled;
+  root.style.setProperty("--grad-from", on ? cfg.gradient_from : cfg.primary_color);
+  root.style.setProperty("--grad-mid", on ? cfg.gradient_mid : cfg.primary_color);
+  root.style.setProperty("--grad-to", on ? cfg.gradient_to : cfg.primary_color);
   root.style.setProperty("--ambient", cfg.ambient_color);
 }
 
