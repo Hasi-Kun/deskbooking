@@ -4,6 +4,7 @@ import AnchoredPopover from "./ui/AnchoredPopover";
 import { GlowCard, CardHeader, CardBody, CardFooter } from "./ui/GlowCard";
 import { ObjectIcon, OBJECT_LABELS } from "./SceneIcons";
 import Button from "./ui/Button";
+import Checkbox from "./ui/Checkbox";
 
 type Props = {
   anchor: DOMRect | null;
@@ -72,14 +73,12 @@ export default function ElementPopover({
                   ))}
                 </select>
               </Field>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox" checked={desk.is_active}
-                  onChange={(e) => onEditDesk(desk.id, { is_active: e.target.checked })}
-                  className="rounded border-line accent-[var(--accent)] focus-ring"
-                />
-                Aktiv (buchbar)
-              </label>
+              <Checkbox
+                id={`desk-active-${desk.id}`}
+                checked={desk.is_active}
+                onChange={(v) => onEditDesk(desk.id, { is_active: v })}
+                label="Aktiv (buchbar)"
+              />
             </>
           )}
 

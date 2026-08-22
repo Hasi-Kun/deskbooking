@@ -78,18 +78,29 @@ export default function FloorCanvas(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // Zoom: "fit" passt die Fläche in die verfügbare Breite ein (nie über 100 %),
+  // ein Zahlenwert setzt einen festen Faktor. Die logischen Koordinaten bleiben
+  // dabei unverändert - nur die Darstellung ändert sich.
+  const [zoomMode, setZoomMode] = useState<"fit" | number>("fit");
+  const [fitScale, setFitScale] = useState(1);
+
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const update = () => {
-      const available = wrap.clientWidth;
-      setScale(Math.min(1, available / floor.width));
+      const available = wrap.clientWidth - 2;   // Rahmen abziehen
+      setFitScale(Math.max(0.2, Math.min(1, available / floor.width)));
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(wrap);
-    return () => ro.disconnect();
+    window.addEventListener("resize", update);
+    return () => { ro.disconnect(); window.removeEventListener("resize", update); };
   }, [floor.width]);
+
+  useEffect(() => {
+    setScale(zoomMode === "fit" ? fitScale : zoomMode);
+  }, [zoomMode, fitScale]);
 
   /** Mausposition in logische Canvas-Koordinaten umrechnen (Skalierung beachten). */
   const localPoint = (e: { clientX: number; clientY: number }) => {
@@ -201,9 +212,17 @@ export default function FloorCanvas(props: Props) {
   const furniture = objects.filter((o) => o.kind !== "wall" && o.kind !== "window");
 
   return (
-    <div ref={wrapRef} className="w-full overflow-hidden rounded-2xl border border-line bg-surface">
-      {/* Höhe folgt der Skalierung, damit kein leerer Raum entsteht */}
-      <div style={{ height: floor.height * scale }} className="relative w-full">
+    <div ref={wrapRef} className="relative w-full">
+      {/* Der äußere Rahmen wächst weich mit; bei Zoom > Fit wird gescrollt. */}
+      <div
+        className="thin-scroll overflow-auto rounded-2xl border border-line bg-surface
+                   transition-[height] duration-300 ease-out"
+        style={{ height: Math.min(floor.height * scale, 760) + 2 }}
+      >
+        <div
+          style={{ width: floor.width * scale, height: floor.height * scale }}
+          className="relative transition-[width,height] duration-300 ease-out"
+        >
         <div
           ref={canvasRef}
           onPointerDown={handlePointerDownCanvas}
@@ -219,12 +238,17 @@ export default function FloorCanvas(props: Props) {
             height: floor.height,
             transform: `scale(${scale})`,
             transformOrigin: "top left",
+            // Das Punktraster ist Hintergrund DIESER Fläche - es wächst also
+            // automatisch mit, wenn Breite/Höhe geändert werden.
             backgroundImage: "radial-gradient(circle, rgb(var(--c-line)) 1px, transparent 1px)",
             backgroundSize: `${GRID}px ${GRID}px`,
             cursor: builder?.wallMode ? "crosshair" : "default",
             touchAction: "none",
           }}
-          className={isOver ? "ring-2 ring-inset ring-accent/60" : ""}
+          className={[
+            "transition-[width,height,transform] duration-300 ease-out",
+            isOver ? "ring-2 ring-inset ring-accent/60" : "",
+          ].join(" ")}
         >
           {/* Wände + Fenster */}
           <svg width={floor.width} height={floor.height} className="absolute inset-0 pointer-events-none">
@@ -431,7 +455,45 @@ export default function FloorCanvas(props: Props) {
             </div>
           )}
         </div>
+        </div>
       </div>
+
+      {/* Zoom-Steuerung - nur im Editor */}
+      {builder && (
+        <div className="pointer-events-auto absolute bottom-3 right-3 flex items-center gap-1
+                        rounded-full border border-line bg-surface/90 px-1 py-1 shadow-lg backdrop-blur
+                        transition-opacity duration-200">
+          <ZoomButton onClick={() => setZoomMode(Math.max(0.25, +(scale - 0.1).toFixed(2)))} label="Verkleinern">
+            −
+          </ZoomButton>
+          <button
+            onClick={() => setZoomMode(zoomMode === "fit" ? 1 : "fit")}
+            title={zoomMode === "fit" ? "Auf 100 % setzen" : "Einpassen"}
+            className="min-w-[52px] rounded-full px-2 py-1 text-[11px] font-medium tabular-nums
+                       text-muted transition-colors hover:bg-raised hover:text-ink focus-ring"
+          >
+            {zoomMode === "fit" ? "Fit" : `${Math.round(scale * 100)}%`}
+          </button>
+          <ZoomButton onClick={() => setZoomMode(Math.min(2, +(scale + 0.1).toFixed(2)))} label="Vergrößern">
+            +
+          </ZoomButton>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ZoomButton({
+  onClick, label, children,
+}: { onClick: () => void; label: string; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className="grid h-6 w-6 place-items-center rounded-full text-sm text-muted
+                 transition-all duration-200 hover:bg-raised hover:text-ink active:scale-90 focus-ring"
+    >
+      {children}
+    </button>
   );
 }

@@ -27,6 +27,9 @@ module.exports = {
         mono: ["ui-monospace", "JetBrains Mono", "SFMono-Regular", "Menlo", "monospace"],
       },
       borderRadius: { xl2: "16px" },
+      transitionTimingFunction: {
+        smooth: "cubic-bezier(0.22, 1, 0.36, 1)",
+      },
       keyframes: {
         ripple: {
           "0%": { transform: "scale(0)", opacity: "0.45" },

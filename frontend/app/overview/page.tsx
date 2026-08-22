@@ -27,10 +27,19 @@ export default function OverviewPage() {
   const [start, setStart] = useState(toISO(new Date()));
   const [loading, setLoading] = useState(true);
 
-  const days = useMemo(
-    () => Array.from({ length: span }, (_, i) => addDays(start, i)),
-    [start, span]
-  );
+  // Nur Werktage (Mo-Fr). Es wird so lange weitergezaehlt, bis "span" viele
+  // Arbeitstage zusammengekommen sind - Wochenenden zaehlen nicht mit.
+  const days = useMemo(() => {
+    const out: string[] = [];
+    let cursor = start;
+    let guard = 0;
+    while (out.length < span && guard++ < span * 3 + 14) {
+      const wd = fromISO(cursor).getDay();
+      if (wd !== 0 && wd !== 6) out.push(cursor);
+      cursor = addDays(cursor, 1);
+    }
+    return out;
+  }, [start, span]);
 
   const load = useCallback(async (fId: string, from: string, to: string) => {
     const [d, b] = await Promise.all([
@@ -78,7 +87,7 @@ export default function OverviewPage() {
   // Kennzahlen über den Zeitraum
   const stats = useMemo(() => {
     const workdays = days.filter((d) => {
-      const wd = fromISO(d).getDay();
+      const wd = fromISO(d).getDay();  // defensiv: days enthaelt bereits nur Mo-Fr
       return wd !== 0 && wd !== 6;
     });
     const capacity = bookable.length * workdays.length;
@@ -150,7 +159,7 @@ export default function OverviewPage() {
         {/* Kennzahlen im Karten-Stil */}
         <GlowCard>
           <CardHeader icon={<ChartIcon />} title="Auslastung im Zeitraum"
-                      subtitle={`${days[0]} bis ${days[days.length - 1]} · nur Werktage gewertet`} />
+                      subtitle={`${days[0]} bis ${days[days.length - 1]} · Montag bis Freitag`} />
           <CardBody>
             <StatPair
               left={{

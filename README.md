@@ -61,13 +61,21 @@ Ein Bedienelement steuert den Zeitraum: Pfeile zum Blättern, Klick auf die
 Anzeige öffnet Ansichtswahl (Tag / Woche / Monat / Frei) und Kalender. Ein
 „Heute"-Knopf erscheint, sobald man den aktuellen Zeitraum verlassen hat.
 
-Darunter die Tagesleiste: pro Tag ein Balken als Ampel — Akzentfarbe ab 50 %
-frei, gelb ab 20 %, orange darunter, rot bei ausgebucht. Klick wechselt den im
+Darunter die Tagesleiste: pro Tag ein Balken als Ampel — grün ab 50 % frei,
+gelb ab 20 %, orange darunter, rot bei ausgebucht. Die Ampel und die
+Platz-Zustände (frei/belegt) nutzen bewusst feste Signalfarben und **nicht**
+die Akzentfarbe, damit sie bei jeder Farbwahl lesbar bleiben. Klick wechselt den im
 Grundriss gezeigten Tag.
 
 Klick auf einen Platz öffnet ein Panel **neben dem Platz** (kein Fenster) mit
 Notizfeld und optionaler Mehrtages-Buchung. Belegte Tage werden dabei
 übersprungen statt die ganze Aktion abzubrechen.
+
+### Belegung (Gantt)
+
+Zeigt je Platz eine Zeile über den gewählten Zeitraum. Es werden **nur
+Werktage (Mo–Fr)** dargestellt und gewertet — Wochenenden würden die
+Auslastungsquote sonst künstlich drücken.
 
 ### Layout-Editor (nur Admins)
 
@@ -84,8 +92,9 @@ Notizfeld und optionaler Mehrtages-Buchung. Belegte Tage werden dabei
   sich und werden über „Speichern" (Strg/Cmd + S) gebündelt übertragen. Der
   Status oben rechts zeigt „Nicht gespeichert" bzw. die Uhrzeit. Neu angelegte
   und gelöschte Elemente wirken sofort, weil sie serverseitig eine ID brauchen.
-- **Fläche:** Breite/Höhe frei einstellbar (400–4000 px) oder per Vorgabe. Die
-  Zeichenfläche skaliert automatisch auf die Fensterbreite.
+- **Fläche:** Breite und Höhe per Regler live veränderbar (400–4000 px); das
+  Punktraster wächst mit. Unten rechts steuert eine Zoom-Leiste die Ansicht
+  („Fit" passt in die Fensterbreite ein, +/− zoomt zwischen 25 % und 200 %).
 
 ### Nutzerverwaltung (nur Admins)
 

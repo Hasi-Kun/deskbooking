@@ -19,9 +19,9 @@ export default function DeskTile({
       className={[
         "group/tile relative h-full w-full overflow-hidden rounded-xl border",
         "flex flex-col justify-center px-2.5 transition-all duration-500",
-        isFree ? "border-line bg-surface" : "",
+        isFree ? "border-free/35 bg-free/[0.06] hover:border-free/60 hover:bg-free/[0.10]" : "",
         isMine ? "border-transparent" : "",
-        state === "occupied" ? "border-line bg-raised" : "",
+        state === "occupied" ? "border-occupied/40 bg-occupied/[0.14]" : "",
         state === "fixed" ? "border-dashed border-line bg-raised" : "",
         state === "inactive" ? "border-line bg-raised opacity-40" : "",
       ].filter(Boolean).join(" ")}
@@ -32,15 +32,15 @@ export default function DeskTile({
         <>
           <span
             aria-hidden="true"
-            className="orb -z-10 h-10 w-10 opacity-0 transition-all duration-500
-                       group-hover/tile:translate-x-6 group-hover/tile:-translate-y-3 group-hover/tile:opacity-60"
-            style={{ background: "var(--accent)", top: "60%", right: "10%" }}
+            className="orb -z-10 h-10 w-10 bg-free opacity-0 transition-all duration-500
+                       group-hover/tile:translate-x-6 group-hover/tile:-translate-y-3 group-hover/tile:opacity-50"
+            style={{ top: "60%", right: "10%" }}
           />
           <span
             aria-hidden="true"
             className="orb -z-10 h-12 w-12 opacity-0 transition-all duration-500
-                       group-hover/tile:-translate-x-5 group-hover/tile:translate-y-4 group-hover/tile:opacity-45"
-            style={{ background: "var(--accent-2)", top: "-15%", left: "10%" }}
+                       group-hover/tile:-translate-x-5 group-hover/tile:translate-y-4 group-hover/tile:opacity-35"
+            style={{ background: "var(--grad-to)", top: "-15%", left: "10%" }}
           />
         </>
       )}
@@ -50,7 +50,7 @@ export default function DeskTile({
           className={[
             "font-mono text-[13px] font-bold leading-none tracking-tight",
             isMine ? "text-accent-ink" : "text-ink",
-            isFree ? "glow-text" : "",
+            isFree ? "text-free" : "",
           ].join(" ")}
         >
           {name}
@@ -86,11 +86,12 @@ function StateDot({ state }: { state: DeskState }) {
     return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-ink/70" />;
   }
   if (state === "free") {
+    // Bewusst die semantische Frei-Farbe, NICHT der Akzent: sonst wird der
+    // Zustand unlesbar, sobald jemand einen dunklen Akzent einstellt.
     return (
-      <span className="relative flex h-1.5 w-1.5 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-              style={{ background: "var(--accent)" }} />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-free opacity-50" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-free" />
       </span>
     );
   }

@@ -4,6 +4,7 @@ import { Desk, Booking } from "@/lib/api";
 import AnchoredPopover from "./ui/AnchoredPopover";
 import { GlowCard, CardHeader, CardBody, CardFooter } from "./ui/GlowCard";
 import Button from "./ui/Button";
+import Checkbox from "./ui/Checkbox";
 import { formatLong, toISO, fromISO } from "./ui/DatePicker";
 
 type Props = {
@@ -117,15 +118,13 @@ export default function BookingPopover({
 
           {!booking && !isFixed && (
             <>
-              <label className="flex cursor-pointer items-start gap-2.5">
-                <input type="checkbox" checked={multiDay}
-                       onChange={(e) => setMultiDay(e.target.checked)}
-                       className="mt-0.5 rounded border-line accent-[var(--accent)] focus-ring" />
-                <span className="text-sm leading-tight">
-                  Mehrere Tage
-                  <span className="block text-[11px] text-muted">Belegte Tage werden übersprungen</span>
-                </span>
-              </label>
+              <Checkbox
+                id="bk-multiday"
+                checked={multiDay}
+                onChange={setMultiDay}
+                label="Mehrere Tage"
+                hint="Belegte Tage werden übersprungen"
+              />
 
               {multiDay && (
                 <div className="animate-fade-in space-y-2">
@@ -143,12 +142,12 @@ export default function BookingPopover({
                              className="w-full rounded-md border border-line bg-raised px-2 py-1.5 text-xs focus-ring" />
                     </label>
                   </div>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input type="checkbox" checked={skipWeekends}
-                           onChange={(e) => setSkipWeekends(e.target.checked)}
-                           className="rounded border-line accent-[var(--accent)] focus-ring" />
-                    <span className="text-[11px] text-muted">Wochenenden auslassen</span>
-                  </label>
+                  <Checkbox
+                    id="bk-skip-we"
+                    checked={skipWeekends}
+                    onChange={setSkipWeekends}
+                    label="Wochenenden auslassen"
+                  />
                 </div>
               )}
 

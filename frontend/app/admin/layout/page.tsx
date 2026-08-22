@@ -338,12 +338,12 @@ export default function LayoutBuilder() {
           {currentFloor && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Fläche</span>
-              <NumberField
-                label="B" value={currentFloor.width} min={400} max={4000} step={50}
+              <SizeControl
+                label="Breite" value={currentFloor.width} min={400} max={4000}
                 onChange={(v) => resizeFloor(v, currentFloor.height)}
               />
-              <NumberField
-                label="H" value={currentFloor.height} min={300} max={4000} step={50}
+              <SizeControl
+                label="Höhe" value={currentFloor.height} min={300} max={4000}
                 onChange={(v) => resizeFloor(currentFloor.width, v)}
               />
               <div className="flex gap-1">
@@ -440,22 +440,28 @@ function Slider({
   );
 }
 
-function NumberField({
-  label, value, min, max, step, onChange,
-}: {
-  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void;
-}) {
+function SizeControl({
+  label, value, min, max, onChange,
+}: { label: string; value: number; min: number; max: number; onChange: (v: number) => void }) {
   return (
-    <label className="inline-flex items-center gap-1">
-      <span className="text-[11px] text-muted">{label}</span>
+    <div className="flex items-center gap-2">
+      <span className="w-11 text-[11px] text-muted">{label}</span>
+      {/* Regler wirkt sofort - die Fläche wächst live mit, ohne Bestätigen */}
       <input
-        type="number" value={value} min={min} max={max} step={step}
+        type="range" min={min} max={max} step={20} value={value}
+        onChange={(e) => onChange(+e.target.value)}
+        className="w-24 accent-[var(--accent)]"
+        aria-label={label}
+      />
+      <input
+        type="number" value={value} min={min} max={max} step={20}
         onChange={(e) => {
           const v = Number(e.target.value);
           if (Number.isFinite(v) && v >= min && v <= max) onChange(v);
         }}
-        className="w-[74px] rounded-md border border-line bg-surface px-2 py-1 text-xs tabular-nums focus-ring"
+        className="w-[64px] rounded-md border border-line bg-raised px-1.5 py-1 text-xs tabular-nums
+                   transition-colors focus-ring"
       />
-    </label>
+    </div>
   );
 }

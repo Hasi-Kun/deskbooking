@@ -8,7 +8,9 @@ export type DayLoad = { date: string; free: number; total: number; mine: boolean
 function tone(free: number, total: number) {
   if (total === 0) return { cls: "bg-occupied/40", label: "keine Plätze" };
   const pct = free / total;
-  if (pct >= 0.5) return { cls: "bg-[--accent]", label: "viel frei" };
+  // Ampel bleibt bewusst grün/gelb/rot - unabhängig von der Akzentfarbe,
+  // sonst ist die Aussage bei dunklem oder rotem Akzent nicht mehr lesbar.
+  if (pct >= 0.5) return { cls: "bg-free", label: "viel frei" };
   if (pct >= 0.2) return { cls: "bg-amber-400", label: "wird eng" };
   if (pct > 0) return { cls: "bg-orange-500", label: "fast voll" };
   return { cls: "bg-red-500", label: "ausgebucht" };
