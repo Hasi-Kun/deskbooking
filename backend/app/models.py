@@ -59,6 +59,10 @@ class User(Base):
     # --- Namens-Stil (rein kosmetisch, z.B. Glitzer-Effekt) ---
     name_style: Mapped[str] = mapped_column(String(20), default="plain")   # plain | glitter
     name_style_color: Mapped[str] = mapped_column(String(7), default="#35E0C0")
+    # "Deine Buchung"-Markierung (Grundriss/Belegungsübersicht) folgt per
+    # Default einer festen, neutralen Farbe statt der Marken-Akzentfarbe -
+    # letztere kann sich unabhängig davon ändern (Branding-Einstellungen).
+    mine_uses_accent: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Profilbild ---
     # Bewusst als Bytes in der DB statt als Datei im Dateisystem: der

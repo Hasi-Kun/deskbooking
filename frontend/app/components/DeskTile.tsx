@@ -32,7 +32,7 @@ export default function DeskTile({
         state === "fixed" ? "border-dashed border-accent/45 bg-accent/[0.07]" : "",
         state === "inactive" ? "border-line bg-raised opacity-40" : "",
       ].filter(Boolean).join(" ")}
-      style={isMine ? { background: "var(--accent)" } : undefined}
+      style={isMine ? { background: "var(--mine-active, rgb(var(--c-mine)))" } : undefined}
     >
       {/* Farbkugeln: nur bei freien Plätzen, wandern beim Hover */}
       {isFree && (
@@ -57,7 +57,7 @@ export default function DeskTile({
           <span
             className={[
               "text-[13px] font-bold leading-none tracking-tight tabular-nums truncate",
-              isMine ? "text-accent-ink" : "text-ink",
+              isMine ? "text-mine-ink" : "text-ink",
               isFree ? "text-free" : "",
             ].join(" ")}
           >
@@ -70,7 +70,7 @@ export default function DeskTile({
             <span
               className={[
                 "flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[9px] font-semibold tabular-nums",
-                isMine ? "text-accent-ink/85" : "text-muted",
+                isMine ? "text-mine-ink/85" : "text-muted",
               ].join(" ")}
               style={!isMine ? { background: "color-mix(in srgb, var(--accent) 12%, transparent)" } : undefined}
               title={`Konferenztisch · ${capacity} Plätze`}
@@ -94,7 +94,7 @@ export default function DeskTile({
         <span
           className={[
             "pointer-events-none relative z-10 mt-1 flex items-center gap-1.5 text-[10px] leading-tight",
-            isMine ? "text-accent-ink/85" : "text-muted",
+            isMine ? "text-mine-ink/85" : "text-muted",
           ].join(" ")}
         >
           {/* Bewusst nur das Avatar-Bild/Monogramm, nie der ausgeschriebene
@@ -118,7 +118,7 @@ export default function DeskTile({
 
 function StateDot({ state }: { state: DeskState }) {
   if (state === "mine") {
-    return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-ink/70" />;
+    return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-mine-ink/70" />;
   }
   if (state === "free") {
     // Bewusst die semantische Frei-Farbe, NICHT der Akzent: sonst wird der

@@ -102,6 +102,8 @@ async def _run_migrations():
         "ALTER TABLE desks ADD COLUMN IF NOT EXISTS fixed_days VARCHAR(20) NOT NULL DEFAULT '0,1,2,3,4'",
         # v10: Online-Status im Chat (Heartbeat-basiert).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+        # v11: "Deine Buchung"-Farbe optional an die Marken-Akzentfarbe binden.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS mine_uses_accent BOOLEAN NOT NULL DEFAULT false",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

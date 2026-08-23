@@ -347,7 +347,7 @@ export default function OverviewPage() {
                             weekend && !b && !fixed ? "bg-line/40" : cls,
                             !b && !fixed && !weekend ? "bg-line/70" : "",
                           ].join(" ")}
-                          style={mine ? { background: "var(--accent)" } : undefined}
+                          style={mine ? { background: "var(--mine-active, rgb(var(--c-mine)))" } : undefined}
                         />
                       </td>
                     );
@@ -368,7 +368,7 @@ export default function OverviewPage() {
         {/* Legende */}
         <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
           <Legend className="bg-line/70" label="Frei" />
-          <Legend style={{ background: "var(--accent)" }} label="Deine Buchung" />
+          <Legend style={{ background: "var(--mine-active, rgb(var(--c-mine)))" }} label="Deine Buchung" />
           <Legend className="bg-occupied/60" label="Belegt" />
           <Legend className="bg-occupied/25" label="Fest vergeben" />
           <Legend className="bg-line/40" label="Wochenende" />

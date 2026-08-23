@@ -303,7 +303,7 @@ export default function FloorCanvas(props: Props) {
                     key={w.id}
                     points={pts}
                     fill="none"
-                    stroke={selected ? "url(#wall-accent)" : "var(--accent)"}
+                    stroke={selected ? "url(#wall-accent)" : "rgb(var(--c-window))"}
                     strokeWidth={selected ? 2.5 : 1.75}
                     strokeLinejoin="round"
                     opacity={selected ? 1 : 0.8}

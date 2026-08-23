@@ -81,7 +81,10 @@ export default function AppShell({
   }
 
   return (
-    <div className="min-h-screen">
+    <div
+      className="min-h-screen"
+      style={user?.mine_uses_accent ? { ["--mine-active" as any]: "var(--accent)", ["--mine-active-ink" as any]: "var(--accent-ink)" } : undefined}
+    >
       <header className="sticky top-0 z-30 bg-surface/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-5">

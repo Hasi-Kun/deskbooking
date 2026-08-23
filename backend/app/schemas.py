@@ -31,6 +31,11 @@ class UserOut(BaseModel):
     name_style: str = "plain"
     name_style_color: str = "#35E0C0"
     avatar_url: str | None = None
+    mine_uses_accent: bool = False
+
+
+class MineColorUpdate(BaseModel):
+    mine_uses_accent: bool
 
 
 class UserCreate(BaseModel):

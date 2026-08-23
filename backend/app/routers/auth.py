@@ -13,6 +13,7 @@ from ..schemas import (
     LoginRequest, UserOut, ChangePasswordRequest, UserStatusOut,
     TotpSetupResponse, TotpVerifyRequest, TotpDisableRequest, BackupCodesResponse,
     NameStyleUpdate,
+    MineColorUpdate,
 )
 from ..security import (
     verify_password, hash_password, create_access_token,
@@ -296,6 +297,17 @@ async def set_name_style(payload: NameStyleUpdate, user: User = Depends(get_curr
     """Rein kosmetisch - jede:r stellt den eigenen Stil selbst ein."""
     user.name_style = payload.name_style
     user.name_style_color = payload.name_style_color
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.put("/mine-color", response_model=UserOut, dependencies=[Depends(verify_csrf)])
+async def set_mine_color(payload: MineColorUpdate, user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """Ob die "Deine Buchung"-Markierung der Marken-Akzentfarbe folgt oder
+    der festen Standardfarbe - ebenfalls rein kosmetisch, pro Person."""
+    user.mine_uses_accent = payload.mine_uses_accent
     await db.commit()
     await db.refresh(user)
     return user

@@ -155,7 +155,7 @@ export default function DayResourceView({
           Ansichten sich nicht widersprechen. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line px-4 py-2.5 text-[11px] text-muted">
         <Legend cls="bg-free/25 border-free/50" label="Frei" />
-        <span className="flex items-center gap-1.5"><span className="text-accent">★</span>Deine Buchung</span>
+        <span className="flex items-center gap-1.5"><span className="text-mine">★</span>Deine Buchung</span>
         <Legend cls="bg-occupied/25 border-occupied/50" label="Belegt" />
         <Legend cls="bg-accent/10 border-accent/40 border-dashed" label="Fest vergeben" />
       </div>
@@ -167,10 +167,11 @@ type Tone = "free" | "mine" | "occupied" | "fixed";
 
 const TONE_CLS: Record<Tone, string> = {
   free: "border-free/40 bg-free/[0.07]",
-  // War vorher ein volles Akzent-Feld (wirkte wie ein grauer Balken, wenn
-  // der Akzent gedämpft eingestellt war) - jetzt dieselbe dezente Optik wie
-  // "belegt", nur mit einem kleinen ★ vor dem Namen zur Kennzeichnung.
-  mine: "border-accent/45 bg-accent/[0.08]",
+  // "mine" bekommt seine Farbe per Inline-Style (siehe Segment) statt per
+  // Klasse: die Farbe ist zur Laufzeit umschaltbar (fest vs. Akzent, siehe
+  // Konto-Einstellung), Tailwinds /opacity-Modifikator versteht diese
+  // bedingte CSS-Variable aber nicht.
+  mine: "",
   occupied: "border-occupied/40 bg-occupied/[0.14]",
   fixed: "border-dashed border-accent/45 bg-accent/[0.07]",
 };
@@ -188,11 +189,15 @@ function Segment({
         full ? "min-h-[60px]" : "min-h-[30px]",
         TONE_CLS[tone],
       ].join(" ")}
+      style={isMine ? {
+        borderColor: "color-mix(in srgb, var(--mine-active, rgb(var(--c-mine))) 45%, transparent)",
+        background: "color-mix(in srgb, var(--mine-active, rgb(var(--c-mine))) 8%, transparent)",
+      } : undefined}
       title={sub}
     >
       <span className="flex items-center gap-1 truncate font-medium text-ink">
         {tone !== "free" && <Avatar name={label} size={14} badge="none" />}
-        {isMine && <span className="text-accent" aria-label="Deine Buchung" title="Deine Buchung">★</span>}
+        {isMine && <span className="text-mine" aria-label="Deine Buchung" title="Deine Buchung">★</span>}
         <StyledName name={label} style={style} color={color} />
       </span>
       {sub && <span className="truncate text-muted">{sub}</span>}
