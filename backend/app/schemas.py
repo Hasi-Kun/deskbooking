@@ -32,10 +32,12 @@ class UserOut(BaseModel):
     name_style_color: str = "#35E0C0"
     avatar_url: str | None = None
     mine_uses_accent: bool = False
+    mine_color: str = "#3B82F6"
 
 
 class MineColorUpdate(BaseModel):
     mine_uses_accent: bool
+    mine_color: str = Field(default="#3B82F6", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class UserCreate(BaseModel):

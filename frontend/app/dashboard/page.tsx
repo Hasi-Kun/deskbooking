@@ -313,7 +313,7 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
           <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-free" />Frei</span>
           <span className="flex items-center gap-1.5">
-            <i className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--accent)" }} />Deine Buchung
+            <i className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--mine-active, rgb(var(--c-mine)))" }} />Deine Buchung
           </span>
           <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-occupied" />Belegt</span>
           <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full border border-dashed border-line" />Fest vergeben</span>

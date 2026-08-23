@@ -101,6 +101,7 @@ export type User = {
   id: string; email: string; full_name: string; role: string;
   name_style?: string; name_style_color?: string; avatar_url?: string | null;
   mine_uses_accent?: boolean;
+  mine_color?: string;
 };
 
 export type Floor = {

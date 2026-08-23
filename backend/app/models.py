@@ -63,6 +63,9 @@ class User(Base):
     # Default einer festen, neutralen Farbe statt der Marken-Akzentfarbe -
     # letztere kann sich unabhängig davon ändern (Branding-Einstellungen).
     mine_uses_accent: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Frei wählbare Farbe für "Deine Buchung", wenn sie NICHT an die
+    # Akzentfarbe gebunden ist (siehe mine_uses_accent).
+    mine_color: Mapped[str] = mapped_column(String(7), default="#3B82F6")
 
     # --- Profilbild ---
     # Bewusst als Bytes in der DB statt als Datei im Dateisystem: der

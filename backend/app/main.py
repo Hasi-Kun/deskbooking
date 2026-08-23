@@ -104,6 +104,7 @@ async def _run_migrations():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
         # v11: "Deine Buchung"-Farbe optional an die Marken-Akzentfarbe binden.
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS mine_uses_accent BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS mine_color VARCHAR(7) NOT NULL DEFAULT '#3B82F6'",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

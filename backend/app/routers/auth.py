@@ -306,8 +306,9 @@ async def set_name_style(payload: NameStyleUpdate, user: User = Depends(get_curr
 async def set_mine_color(payload: MineColorUpdate, user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
     """Ob die "Deine Buchung"-Markierung der Marken-Akzentfarbe folgt oder
-    der festen Standardfarbe - ebenfalls rein kosmetisch, pro Person."""
+    einer frei wählbaren eigenen Farbe - rein kosmetisch, pro Person."""
     user.mine_uses_accent = payload.mine_uses_accent
+    user.mine_color = payload.mine_color
     await db.commit()
     await db.refresh(user)
     return user

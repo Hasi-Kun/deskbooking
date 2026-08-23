@@ -22,7 +22,7 @@ const RefreshContext = createContext<() => Promise<PublicConfig | null>>(async (
 export const useBrandRefresh = () => useContext(RefreshContext);
 
 /** Wählt Schwarz oder Weiß als Schrift auf der Akzentfläche (WCAG-Näherung). */
-function contrastInk(hex: string): string {
+export function contrastInk(hex: string): string {
   const m = hex.replace("#", "");
   if (m.length !== 6) return "#0a0a0a";
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16) / 255);

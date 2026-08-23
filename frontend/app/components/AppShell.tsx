@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { api, User, clearSessionActive } from "@/lib/api";
+import { contrastInk } from "./BrandProvider";
 import SettingsMenu from "./SettingsMenu";
 import Avatar from "./ui/Avatar";
 import { useTheme } from "./ThemeToggle";
@@ -83,7 +84,11 @@ export default function AppShell({
   return (
     <div
       className="min-h-screen"
-      style={user?.mine_uses_accent ? { ["--mine-active" as any]: "var(--accent)", ["--mine-active-ink" as any]: "var(--accent-ink)" } : undefined}
+      style={user?.mine_uses_accent
+        ? { ["--mine-active" as any]: "var(--accent)", ["--mine-active-ink" as any]: "var(--accent-ink)" }
+        : user?.mine_color
+          ? { ["--mine-active" as any]: user.mine_color, ["--mine-active-ink" as any]: contrastInk(user.mine_color) }
+          : undefined}
     >
       <header className="sticky top-0 z-30 bg-surface/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">

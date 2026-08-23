@@ -163,10 +163,12 @@ export default function AccountPage() {
     } catch (e) { /* stumm - rein kosmetisch, kein Blocker */ }
   }
 
-  async function saveMineColor(useAccent: boolean) {
-    setStatus((s) => (s ? { ...s, mine_uses_accent: useAccent } : s));
+  async function saveMineColor(useAccent: boolean, color: string) {
+    setStatus((s) => (s ? { ...s, mine_uses_accent: useAccent, mine_color: color } : s));
     try {
-      await api("/api/auth/mine-color", { method: "PUT", body: JSON.stringify({ mine_uses_accent: useAccent }) });
+      await api("/api/auth/mine-color", {
+        method: "PUT", body: JSON.stringify({ mine_uses_accent: useAccent, mine_color: color }),
+      });
     } catch (e) { /* stumm - rein kosmetisch, kein Blocker */ }
   }
 
@@ -502,17 +504,21 @@ export default function AccountPage() {
         {/* Farbe für "Deine Buchung" */}
         <section className="rounded-xl2 border border-line bg-surface p-4">
           <h2 className="text-sm font-semibold">Farbe für „Deine Buchung“</h2>
-          <p className="mt-1 text-sm text-muted">
-            Markiert im Grundriss und in der Belegungsübersicht deinen eigenen Platz. Standardmäßig eine
-            feste Farbe, unabhängig von der sonstigen Akzentfarbe der Anwendung.
-          </p>
+
+          <div className="mt-3 max-w-[200px]">
+            <ColorPicker
+              label="Eigene Farbe"
+              value={status?.mine_color || "#3B82F6"}
+              onChange={(c) => saveMineColor(!!status?.mine_uses_accent, c)}
+            />
+          </div>
+
           <div className="mt-3">
             <Switch
               id="mine-uses-accent"
               checked={!!status?.mine_uses_accent}
-              onChange={saveMineColor}
-              label="An die Akzentfarbe binden"
-              hint="Aus: feste, neutrale Farbe · An: folgt der Akzentfarbe der Anwendung"
+              onChange={(v) => saveMineColor(v, status?.mine_color || "#3B82F6")}
+              label="Stattdessen an die Akzentfarbe binden"
             />
           </div>
         </section>
