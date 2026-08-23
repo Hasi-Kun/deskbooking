@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import Floor, Desk, User
+from ..models import Floor, User, AuditLog
 from ..schemas import FloorOut, FloorCreate, FloorUpdate
 from ..deps import get_current_user, require_admin, verify_csrf
 
@@ -39,14 +39,18 @@ async def update_floor(floor_id: str, payload: FloorUpdate,
 
 
 @router.delete("/{floor_id}", dependencies=[Depends(verify_csrf)])
-async def delete_floor(floor_id: str, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+async def delete_floor(floor_id: str, request: Request,
+                        admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Löscht die Ebene samt allem, was darauf liegt (Plätze, Einrichtung,
+    Buchungen) - das übernehmen die vorhandenen ON DELETE CASCADE-Regeln bzw.
+    die "delete-orphan"-Relationship auf Floor.desks/scene_objects. Bewusst
+    kein Vorab-Check mehr, der das bei vorhandenen Plätzen verweigert - das
+    Frontend holt vorher eine explizite Bestätigung ein."""
     floor = await db.get(Floor, floor_id)
     if not floor:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ebene nicht gefunden")
-    desk_count = await db.scalar(select(Desk).where(Desk.floor_id == floor_id))
-    if desk_count is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                             "Ebene enthält noch Plätze - erst Plätze entfernen oder verschieben")
+    db.add(AuditLog(user_id=admin.id, action=f"floor_deleted:{floor.name}", entity="floor",
+                     entity_id=floor_id, ip_address=request.client.host if request.client else ""))
     await db.delete(floor)
     await db.commit()
     return {"ok": True}

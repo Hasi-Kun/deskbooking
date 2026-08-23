@@ -356,6 +356,19 @@ class DirectoryUser(BaseModel):
     online: bool = False
 
 
+# ---------- Aktivitäten-Log (Admin) ----------
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    action: str
+    entity: str = ""
+    entity_id: str = ""
+    ip_address: str = ""
+    timestamp: datetime
+    user_id: str | None = None
+    user_name: str | None = None   # None, wenn das Konto seither gelöscht wurde
+
+
 # ---------- Urlaub / Abwesenheit ----------
 class AbsenceCreate(BaseModel):
     date_from: date

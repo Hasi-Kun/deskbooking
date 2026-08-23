@@ -6,7 +6,7 @@ import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import Avatar from "../components/ui/Avatar";
 import StyledName from "../components/StyledName";
-import { Skeleton } from "../components/ui/Skeleton";
+import { Skeleton, ChatSkeleton } from "../components/ui/Skeleton";
 
 const POLL_MS = 4000;
 
@@ -26,7 +26,7 @@ function timeShort(iso: string) {
 export default function ChatPage() {
   return (
     <Suspense fallback={
-      <AppShell user={null}><Skeleton className="h-[560px] w-full rounded-xl2" /></AppShell>
+      <AppShell user={null}><ChatSkeleton /></AppShell>
     }>
       <ChatPageInner />
     </Suspense>
@@ -84,7 +84,7 @@ function ChatPageInner() {
   if (loading) {
     return (
       <AppShell user={user}>
-        <Skeleton className="h-[560px] w-full rounded-xl2" />
+        <ChatSkeleton />
       </AppShell>
     );
   }

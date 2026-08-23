@@ -9,8 +9,9 @@ import InventoryPalette, { PaletteItem } from "../../components/InventoryPalette
 import { OBJECT_DEFAULTS } from "../../components/SceneIcons";
 import ElementPopover from "../../components/ElementPopover";
 import Button from "../../components/ui/Button";
+import AlertDialog from "../../components/ui/AlertDialog";
 import EditorGuide from "../../components/EditorGuide";
-import { Skeleton } from "../../components/ui/Skeleton";
+import { FloorSkeleton } from "../../components/ui/Skeleton";
 
 /** Gesammelte, noch nicht gespeicherte Aenderungen. Positionen werden beim
  *  Ziehen nur lokal gehalten und erst beim Speichern gebuendelt geschrieben -
@@ -47,6 +48,12 @@ export default function LayoutBuilder() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  // Ersetzt die zwei vorherigen native confirm()-Dialoge (Ebene wechseln bei
+  // ungespeicherten Änderungen, Ebene löschen) durch den projekteigenen
+  // AlertDialog - passend zu den übrigen Bestätigungsdialogen im Editor.
+  const [pendingFloorSwitch, setPendingFloorSwitch] = useState<string | null>(null);
+  const [pendingFloorDelete, setPendingFloorDelete] = useState<Floor | null>(null);
+  const [deletingFloor, setDeletingFloor] = useState(false);
 
   const pending = useRef<Pending>(emptyPending());
   // save() liest den aktuellen Ebenen-Stand über eine Ref (nicht über die
@@ -152,6 +159,37 @@ export default function LayoutBuilder() {
       fail(e);
     } finally {
       setSaving(false);
+    }
+  }
+
+  function switchFloor(id: string) {
+    if (dirty) { setPendingFloorSwitch(id); return; }
+    setFloorId(id);
+    setSelection(null);
+    setMenuAt(null);
+  }
+
+  async function deleteFloor(floor: Floor) {
+    setDeletingFloor(true);
+    setError(null);
+    try {
+      await api(`/api/floors/${floor.id}`, { method: "DELETE" });
+      const next = floors.filter((f) => f.id !== floor.id);
+      setFloors(next);
+      cacheFloors(next);
+      if (floorId === floor.id) {
+        pending.current = emptyPending();
+        setDirty(false);
+        setSelection(null);
+        setMenuAt(null);
+        setFloorId(next[0]?.id ?? null);
+        if (!next.length) { setDesks([]); setObjects([]); }
+      }
+      setPendingFloorDelete(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setDeletingFloor(false);
     }
   }
 
@@ -285,24 +323,21 @@ export default function LayoutBuilder() {
   const hasPanel = !!(selDesk || selObject);
 
   if (loading) {
-    return <AppShell user={user}><Skeleton className="h-96 w-full rounded-xl2" /></AppShell>;
+    return <AppShell user={user}><FloorSkeleton /></AppShell>;
   }
 
   return (
     <AppShell user={user}>
       {/* Kopfzeile: Ebenen + Speichern */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" data-allow-context-menu="true">
           {floors.map((f) => (
             <Button
               key={f.id} size="sm"
               variant={f.id === floorId ? "primary" : "secondary"}
-              onClick={() => {
-                if (dirty && !confirm("Ungespeicherte Änderungen gehen verloren. Trotzdem wechseln?")) return;
-                setFloorId(f.id);
-                setSelection(null);
-                setMenuAt(null);
-              }}
+              onClick={() => switchFloor(f.id)}
+              onContextMenu={(e) => { e.preventDefault(); setPendingFloorDelete(f); }}
+              title="Rechtsklick zum Löschen"
             >
               {f.name}
             </Button>
@@ -424,6 +459,34 @@ export default function LayoutBuilder() {
         onEditDesk={editDesk}
         onEditObject={editObject}
         onRemove={removeSelected}
+      />
+
+      <AlertDialog
+        open={!!pendingFloorSwitch}
+        title="Ungespeicherte Änderungen"
+        description="Beim Wechseln der Ebene gehen sie verloren. Trotzdem wechseln?"
+        actionLabel="Wechseln"
+        onAction={() => {
+          if (pendingFloorSwitch) {
+            setFloorId(pendingFloorSwitch);
+            setSelection(null);
+            setMenuAt(null);
+          }
+          setPendingFloorSwitch(null);
+        }}
+        cancelLabel="Abbrechen"
+        onCancel={() => setPendingFloorSwitch(null)}
+      />
+
+      <AlertDialog
+        open={!!pendingFloorDelete}
+        title={`Ebene „${pendingFloorDelete?.name ?? ""}“ löschen?`}
+        description="Alle Plätze, Einrichtung und Buchungen auf dieser Ebene werden mit gelöscht. Das lässt sich nicht rückgängig machen."
+        actionLabel="Endgültig löschen"
+        actionBusy={deletingFloor}
+        onAction={() => pendingFloorDelete && deleteFloor(pendingFloorDelete)}
+        cancelLabel="Abbrechen"
+        onCancel={() => setPendingFloorDelete(null)}
       />
     </AppShell>
   );

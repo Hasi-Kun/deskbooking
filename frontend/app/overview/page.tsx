@@ -6,7 +6,7 @@ import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import { GlowCard, CardHeader, CardBody, StatPair } from "../components/ui/GlowCard";
 import Button from "../components/ui/Button";
-import { ListSkeleton } from "../components/ui/Skeleton";
+import { TableSkeleton } from "../components/ui/Skeleton";
 import { toISO, fromISO, DatePicker } from "../components/ui/DatePicker";
 import DayResourceView from "../components/DayResourceView";
 
@@ -141,7 +141,7 @@ export default function OverviewPage() {
   const todayISO = toISO(new Date());
 
   if (loading) {
-    return <AppShell user={user}><ListSkeleton rows={6} /></AppShell>;
+    return <AppShell user={user}><TableSkeleton rows={8} /></AppShell>;
   }
 
   return (

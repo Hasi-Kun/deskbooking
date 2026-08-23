@@ -179,6 +179,11 @@ export type Absence = {
   id: string; user_id: string; user_name: string; date_from: string; date_to: string;
 };
 
+export type AuditLogEntry = {
+  id: string; action: string; entity: string; entity_id: string; ip_address: string;
+  timestamp: string; user_id: string | null; user_name: string | null;
+};
+
 /** Sortiert "D-2" vor "D-10" (nicht alphabetisch, wo "D-10" vor "D-2" käme).
  *  Zerlegt in Ziffern-/Nichtziffern-Blöcke und vergleicht Ziffernblöcke
  *  numerisch - so landen Tische/Konferenztische in der Reihenfolge ihrer

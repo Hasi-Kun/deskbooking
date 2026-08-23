@@ -16,7 +16,7 @@ from .models import User, Role, Desk, Floor
 from .security import hash_password
 from .schemas import PublicConfig
 from .routers.settings import load_appearance
-from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router, webauthn, chat, avatars, absences
+from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router, webauthn, chat, avatars, absences, audit
 from .routers.auth import limiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -209,3 +209,4 @@ app.include_router(chat.router)
 app.include_router(admin_users.router)
 app.include_router(avatars.router)
 app.include_router(absences.router)
+app.include_router(audit.router)

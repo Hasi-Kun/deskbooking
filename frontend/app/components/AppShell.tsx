@@ -66,6 +66,7 @@ export default function AppShell({
       ? [
           { href: "/admin/layout", label: "Layout" },
           { href: "/admin/users", label: "Nutzer" },
+          { href: "/admin/audit-log", label: "Aktivität" },
         ]
       : []),
     { href: "/chat", label: "Chat", badge: unread },

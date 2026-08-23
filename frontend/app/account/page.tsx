@@ -12,7 +12,7 @@ import ColorPicker from "../components/ui/ColorPicker";
 import StyledName from "../components/StyledName";
 import Avatar from "../components/ui/Avatar";
 import { isWebAuthnSupported, createPasskey } from "@/lib/webauthn";
-import { Skeleton } from "../components/ui/Skeleton";
+import { FormSkeleton } from "../components/ui/Skeleton";
 import { DateRangePicker, formatLong, toISO, fromISO } from "../components/ui/DatePicker";
 
 type Status = User & { is_active: boolean; totp_enabled: boolean; backup_codes_remaining?: number };
@@ -200,7 +200,7 @@ export default function AccountPage() {
   }
 
   if (loading) {
-    return <AppShell user={status}><Skeleton className="h-64 w-full rounded-xl2" /></AppShell>;
+    return <AppShell user={status}><FormSkeleton fields={4} /></AppShell>;
   }
 
   return (

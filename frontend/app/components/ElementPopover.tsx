@@ -202,7 +202,9 @@ function Slider({
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <label className="text-[11px] font-medium text-muted">{label}</label>
         {/* Zahl direkt editierbar statt nur Anzeige - deckt sich mit dem
-            "Slider + Zahlenfeld"-Muster aus den reui-Vorlagen. */}
+            "Slider + Zahlenfeld"-Muster aus den reui-Vorlagen. Breiter und
+            zentriert (statt schmal + rechtsbündig), damit die nativen
+            Auf/Ab-Pfeile des Zahlenfelds nicht abgeschnitten wirken. */}
         <div className="flex items-center gap-1">
           <input
             type="number" min={min} max={max} step={step} value={Math.round(value)}
@@ -210,7 +212,7 @@ function Slider({
               const v = Number(e.target.value);
               if (!Number.isNaN(v)) onChange(Math.max(min, Math.min(max, v)));
             }}
-            className="w-14 rounded-md border border-line bg-raised px-1.5 py-0.5 text-right
+            className="h-7 w-16 rounded-md border border-line bg-raised text-center
                        text-[11px] tabular-nums focus-ring"
           />
           <span className="text-[10px] text-muted">{unit}</span>

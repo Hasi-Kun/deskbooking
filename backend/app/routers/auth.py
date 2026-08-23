@@ -56,7 +56,10 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
     generic_error = HTTPException(status.HTTP_401_UNAUTHORIZED, "E-Mail oder Passwort ist falsch")
 
     if not user:
-        await _log(db, None, "login_failed_unknown_email", request)
+        # E-Mail wird bewusst mitgeloggt (nur fuers Admin-Log, nicht in der
+        # Fehlermeldung an den Client) - hilft, Tippfehler von echten
+        # Enumerations-/Brute-Force-Versuchen zu unterscheiden.
+        await _log(db, None, "login_failed_unknown_email", request, entity="email_attempt", entity_id=payload.email.lower())
         raise generic_error
 
     if user.locked_until and user.locked_until > datetime.now(timezone.utc):

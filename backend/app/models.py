@@ -328,6 +328,10 @@ class AuditLog(Base):
     ip_address: Mapped[str] = mapped_column(String(64), default="")
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Nur lesend fuers Aktivitäten-Log gebraucht (kein back_populates auf
+    # User noetig) - SET NULL beim Loeschen des Nutzers erhaelt den Eintrag.
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+
 
 class Absence(Base):
     """Urlaub/Abwesenheit einer Person. Wird bei festen Arbeitsplätzen
