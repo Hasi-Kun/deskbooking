@@ -16,7 +16,7 @@ from .models import User, Role, Desk, Floor
 from .security import hash_password
 from .schemas import PublicConfig
 from .routers.settings import load_appearance
-from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router, webauthn, chat
+from .routers import auth, desks, bookings, floors, admin_users, scene, settings as settings_router, webauthn, chat, avatars, absences
 from .routers.auth import limiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -79,6 +79,29 @@ async def _run_migrations():
         # Gruppen-Buchung (booking_attendees ist eine neue Tabelle, die
         # create_all() automatisch anlegt und daher hier nicht braucht).
         "ALTER TABLE desks ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 1",
+        # v6: Profilbild (als Bytes in der DB, siehe User.avatar_url).
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime VARCHAR(40)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data BYTEA",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at TIMESTAMPTZ",
+        # v7: Erwähnungen im Chat (@Name) + Admin-Moderation.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_mention_seen_at TIMESTAMPTZ",
+        "ALTER TABLE messages ADD COLUMN IF NOT EXISTS mentions VARCHAR(2000) NOT NULL DEFAULT ''",
+        # v7: Urlaub/Abwesenheit - Tabelle "absences" ist neu und wird von
+        # create_all() bereits automatisch angelegt, braucht hier kein ALTER.
+        # v8: Konferenztische werden jetzt mit Uhrzeiten gebucht statt
+        # ganztags/halbtags - dafuer koennen mehrere Buchungen pro Tag
+        # denselben (ungenutzten) Slot-Wert teilen. Die alte 1-Buchung-pro-
+        # Slot-Constraint muss deshalb weg; die Ueberschneidungspruefung
+        # passiert jetzt vollstaendig im Router (siehe bookings.py).
+        "ALTER TABLE bookings DROP CONSTRAINT IF EXISTS uq_desk_date_slot",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS start_time TIME",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS end_time TIME",
+        # v9: Feste Zuweisung nur an bestimmten Wochentagen (z.B. Büro
+        # Mo/Di/Do, Homeoffice Mi/Fr - an den Homeoffice-Tagen ist der Platz
+        # frei buchbar). Default deckt das bisherige "immer fest" ab.
+        "ALTER TABLE desks ADD COLUMN IF NOT EXISTS fixed_days VARCHAR(20) NOT NULL DEFAULT '0,1,2,3,4'",
+        # v10: Online-Status im Chat (Heartbeat-basiert).
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
     ]
     async with engine.begin() as conn:
         for stmt in statements:
@@ -184,3 +207,5 @@ app.include_router(settings_router.router)
 app.include_router(webauthn.router)
 app.include_router(chat.router)
 app.include_router(admin_users.router)
+app.include_router(avatars.router)
+app.include_router(absences.router)

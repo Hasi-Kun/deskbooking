@@ -19,6 +19,9 @@ type ViewProps = {
   bookingByDesk: Map<string, Booking[]>;
   currentUserId: string;
   onDeskClick: (desk: Desk, bookings: Booking[], rect: DOMRect) => void;
+  /** Feste Plätze, deren zugewiesene Person heute im Urlaub ist - gelten für
+   *  diesen Tag als frei buchbar statt blockiert. */
+  absentFixedDeskIds?: Set<string>;
 };
 
 type BuilderProps = {
@@ -232,6 +235,10 @@ export default function FloorCanvas(props: Props) {
         >
         <div
           ref={canvasRef}
+          // Nur im Editor vom globalen Rechtsklick-Verbot ausnehmen (siehe
+          // ContextMenuGuard) - die Elemente hier rufen Rechtsklick-Handler
+          // für ihr Eigenschaften-Panel auf, das braucht ein echtes contextmenu.
+          data-allow-context-menu={builder ? "true" : undefined}
           onPointerDown={handlePointerDownCanvas}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -276,16 +283,31 @@ export default function FloorCanvas(props: Props) {
               const x2 = w.x2 ?? w.pos_x;
               const y2 = w.y2 ?? w.pos_y;
               if (w.kind === "window") {
-                // Fenster: Mauer mit hellem Glasband darin - so ist auf einen
-                // Blick klar, dass es eine Wandöffnung ist und keine Linie.
+                // Fenster: dünne, umrandete Fläche (Rechteck entlang der
+                // Wandachse, Mitte leer) statt einer dicken Linie wie bei
+                // einer Wand - dadurch auf einen Blick als Öffnung erkennbar,
+                // nicht als weiteres Wandstück.
+                const dx = x2 - w.pos_x, dy = y2 - w.pos_y;
+                const len = Math.hypot(dx, dy) || 1;
+                const ux = dx / len, uy = dy / len;
+                const px = -uy, py = ux;
+                const half = 4.5;
+                const pts = [
+                  [w.pos_x + px * half, w.pos_y + py * half],
+                  [x2 + px * half, y2 + py * half],
+                  [x2 - px * half, y2 - py * half],
+                  [w.pos_x - px * half, w.pos_y - py * half],
+                ].map((p) => p.join(",")).join(" ");
                 return (
-                  <g key={w.id}>
-                    <line x1={w.pos_x} y1={w.pos_y} x2={x2} y2={y2}
-                          stroke="rgb(var(--c-ink))" strokeWidth={9} strokeLinecap="butt" opacity={0.9} />
-                    <line x1={w.pos_x} y1={w.pos_y} x2={x2} y2={y2}
-                          stroke="url(#wall-accent)" strokeWidth={3.5} strokeLinecap="butt"
-                          opacity={selected ? 1 : 0.85} />
-                  </g>
+                  <polygon
+                    key={w.id}
+                    points={pts}
+                    fill="none"
+                    stroke={selected ? "url(#wall-accent)" : "var(--accent)"}
+                    strokeWidth={selected ? 2.5 : 1.75}
+                    strokeLinejoin="round"
+                    opacity={selected ? 1 : 0.8}
+                  />
                 );
               }
               return (
@@ -416,12 +438,21 @@ export default function FloorCanvas(props: Props) {
 
             if (props.mode === "view") {
               const list = props.bookingByDesk.get(desk.id) ?? [];
-              const fullyBooked = list.some((b) => b.slot === "full") || list.length >= 2;
               // Die eigene Buchung hat Vorrang in der Anzeige.
               booking = list.find((b) => b.user_id === props.currentUserId) ?? list[0];
-              if (desk.capacity > 1) sub = `${desk.capacity} Plätze frei`;
+              const absent = !!desk.fixed_user_id && props.absentFixedDeskIds?.has(desk.id);
               if (!desk.is_active) { state = "inactive"; sub = "Nicht verfügbar"; }
-              else if (desk.fixed_user_id) { state = "fixed"; sub = desk.fixed_user_name || "Fest vergeben"; }
+              else if (desk.fixed_user_id && !absent) { state = "fixed"; sub = "Fest vergeben"; }
+              else if (desk.capacity > 1) {
+                // Konferenztisch: mehrere zeitlich getrennte Meetings pro Tag
+                // möglich - ein einzelner "belegt/frei"-Zustand für den
+                // ganzen Tag ergibt hier keinen Sinn mehr. Bleibt bewusst
+                // "buchbar"; welche Zeiten schon vergeben sind, zeigt erst
+                // das Detail-Panel nach dem Klick.
+                state = "free";
+                booking = undefined;
+                sub = list.length > 0 ? `${list.length} ${list.length === 1 ? "Termin" : "Termine"} heute` : "";
+              }
               else if (booking) {
                 state = booking.user_id === props.currentUserId ? "mine" : "occupied";
                 const half = list.filter((b) => b.slot !== "full");
@@ -437,10 +468,10 @@ export default function FloorCanvas(props: Props) {
                 } else {
                   // Wer genau dort sitzt, steht erst im aufgeklappten Buchungs-
                   // Panel - im Grundriss reicht das Avatar zur Wiedererkennung.
-                  // Bei Konferenztischen zusätzlich die Gruppengröße andeuten.
-                  const extra = booking.attendees?.length ?? 0;
-                  sub = extra > 0 ? `Belegt · +${extra}` : "Belegt";
+                  sub = "Belegt";
                 }
+              } else if (absent) {
+                sub = "Frei (heute nicht im Büro)";
               }
             } else {
               if (!desk.is_active) { state = "inactive"; sub = "Inaktiv"; }
@@ -500,23 +531,12 @@ export default function FloorCanvas(props: Props) {
               >
                 <DeskTile
                   name={desk.name}
-                  sub={sub}
+                  sub={props.mode === "view" ? "" : sub}
                   state={state}
                   capacity={isMeeting ? desk.capacity : undefined}
-                  comment={booking?.comment || undefined}
                   person={
                     state === "occupied" ? booking?.user_name
                     : state === "fixed" ? desk.fixed_user_name ?? undefined
-                    : undefined
-                  }
-                  personStyle={
-                    state === "occupied" ? booking?.user_name_style
-                    : state === "fixed" ? desk.fixed_user_style
-                    : undefined
-                  }
-                  personStyleColor={
-                    state === "occupied" ? booking?.user_name_style_color
-                    : state === "fixed" ? desk.fixed_user_style_color
                     : undefined
                   }
                 />

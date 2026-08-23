@@ -30,6 +30,7 @@ class UserOut(BaseModel):
     role: str
     name_style: str = "plain"
     name_style_color: str = "#35E0C0"
+    avatar_url: str | None = None
 
 
 class UserCreate(BaseModel):
@@ -83,6 +84,8 @@ class DeskOut(BaseModel):
     fixed_user_style: str = "plain"
     fixed_user_style_color: str = "#35E0C0"
     capacity: int = 1
+    # Wochentage (Montag=0...Sonntag=6), an denen die feste Zuweisung gilt.
+    fixed_days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
 
 
 class DeskCreate(BaseModel):
@@ -106,13 +109,18 @@ class DeskUpdate(BaseModel):
     fixed_user_id: str | None = None            # "" oder null => Zuweisung entfernen
     clear_fixed_user: bool = False              # explizit setzen, um Zuweisung zu entfernen
     capacity: int | None = Field(default=None, ge=1, le=30)
+    fixed_days: list[int] | None = None
 
 
 # ---------- Booking ----------
 class BookingCreate(BaseModel):
     desk_id: str
     booking_date: date
-    slot: str = "full"          # full | morning | afternoon
+    slot: str = "full"          # full | morning | afternoon - ignoriert bei Konferenztischen
+    # Nur fuer Konferenztische (Kapazitaet > 1) relevant: Uhrzeitfenster
+    # statt Halbtags-Slot. Format "HH:MM".
+    start_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     comment: str = Field(default="", max_length=280)
     attendee_ids: list[str] = Field(default_factory=list, max_length=29)
 
@@ -147,6 +155,8 @@ class BookingOut(BaseModel):
     booking_date: date
     status: str
     slot: str = "full"
+    start_time: str | None = None
+    end_time: str | None = None
     comment: str = ""
     attendees: list[AttendeeOut] = Field(default_factory=list)
     created_at: datetime
@@ -237,6 +247,7 @@ class UserStatusOut(BaseModel):
     backup_codes_remaining: int = 0
     name_style: str = "plain"
     name_style_color: str = "#35E0C0"
+    avatar_url: str | None = None
 
 
 class RoleUpdate(BaseModel):
@@ -270,7 +281,7 @@ class BackupCodeStatus(BaseModel):
 
 
 class NameStyleUpdate(BaseModel):
-    name_style: str = Field(pattern=r"^(plain|glitter)$")
+    name_style: str = Field(pattern=r"^(plain|glitter|particles)$")
     name_style_color: str = Field(default="#35E0C0", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
@@ -302,6 +313,7 @@ class PasskeyOut(BaseModel):
 class MessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
     recipient_id: str | None = None   # None = globaler Kanal
+    mentioned_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class MessageOut(BaseModel):
@@ -312,8 +324,11 @@ class MessageOut(BaseModel):
     sender_name: str
     sender_name_style: str = "plain"
     sender_name_style_color: str = "#35E0C0"
+    sender_avatar_url: str | None = None
+    sender_online: bool = False
     recipient_id: str | None = None
     body: str
+    mentioned_user_ids: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -323,6 +338,8 @@ class ConversationOut(BaseModel):
     user_name: str
     user_name_style: str = "plain"
     user_name_style_color: str = "#35E0C0"
+    user_avatar_url: str | None = None
+    user_online: bool = False
     last_message: str
     last_at: datetime
     unread: int
@@ -335,3 +352,20 @@ class DirectoryUser(BaseModel):
     full_name: str
     name_style: str = "plain"
     name_style_color: str = "#35E0C0"
+    avatar_url: str | None = None
+    online: bool = False
+
+
+# ---------- Urlaub / Abwesenheit ----------
+class AbsenceCreate(BaseModel):
+    date_from: date
+    date_to: date
+
+
+class AbsenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    user_id: str
+    user_name: str
+    date_from: date
+    date_to: date

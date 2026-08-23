@@ -105,13 +105,6 @@ export default function InventoryPalette({ wallMode, onToggleWallMode }: Props) 
           </p>
         )}
       </div>
-
-      <p className="text-[11px] text-muted leading-snug border-t border-line pt-3">
-        Elemente aus der Leiste auf den Grundriss ziehen. Platzierte Objekte lassen sich
-        anschließend verschieben und im Detail-Panel anpassen. <strong className="text-ink/70 font-medium">
-        Nur Elemente unter „Arbeitsplatz“ sind buchbar</strong> - Einrichtung wie der
-        Besprechungstisch ist reine Deko fürs Layout.
-      </p>
     </aside>
   );
 }

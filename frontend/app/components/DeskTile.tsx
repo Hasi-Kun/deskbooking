@@ -1,6 +1,5 @@
 "use client";
 import Avatar from "./ui/Avatar";
-import StyledName from "./StyledName";
 
 export type DeskState = "free" | "mine" | "occupied" | "fixed" | "inactive";
 
@@ -11,10 +10,9 @@ export type DeskState = "free" | "mine" | "occupied" | "fixed" | "inactive";
  * bleiben neutral und ruhig.
  */
 export default function DeskTile({
-  name, sub, state, comment, person, personStyle, personStyleColor, capacity,
+  name, sub, state, person, capacity,
 }: {
-  name: string; sub: string; state: DeskState; comment?: string; person?: string;
-  personStyle?: string; personStyleColor?: string;
+  name: string; sub: string; state: DeskState; person?: string;
   /** Nur bei Konferenztischen (Kapazität > 1) gesetzt - zeigt ein kleines
    *  Personen-Badge, damit sich Gruppentische im Grundriss auf einen Blick
    *  von Einzelplätzen unterscheiden lassen. */
@@ -92,37 +90,28 @@ export default function DeskTile({
         )}
       </div>
 
-      <span
-        className={[
-          "pointer-events-none relative z-10 mt-1 flex items-center gap-1.5 text-[10px] leading-tight",
-          isMine ? "text-accent-ink/85" : "text-muted",
-        ].join(" ")}
-      >
-        {person && (
-          <Avatar name={person} size={16} badge="none" />
-        )}
-        {/* Steckt der Name im Zusatztext (z.B. "Anna · vorm."), wird nur er
-            eingefärbt/glitzert - der Rest bleibt schlichter Fließtext. */}
-        {person && sub.startsWith(person) ? (
-          <span className="truncate">
-            <StyledName name={person} style={personStyle} color={personStyleColor} />
-            {sub.slice(person.length)}
-          </span>
-        ) : (
-          <span className="truncate">{sub}</span>
-        )}
-      </span>
-
-      {comment && (
+      {(person || sub) && (
         <span
           className={[
-            "pointer-events-none relative z-10 mt-0.5 truncate text-[9px] italic",
-            isMine ? "text-accent-ink/60" : "text-muted/70",
+            "pointer-events-none relative z-10 mt-1 flex items-center gap-1.5 text-[10px] leading-tight",
+            isMine ? "text-accent-ink/85" : "text-muted",
           ].join(" ")}
         >
-          {comment}
+          {/* Bewusst nur das Avatar-Bild/Monogramm, nie der ausgeschriebene
+              Name - der erscheint erst im Detail-Panel nach einem Klick. */}
+          {person && <Avatar name={person} size={16} badge="none" />}
+          {/* Statustext ("Frei"/"Fest vergeben"/...) ist bewusst optional:
+              Farbe + FEST-Badge + Avatar reichen im Grundriss zur
+              Wiedererkennung, ein zusätzlicher Text war nur Rauschen. Wird
+              nur noch übergeben, wenn er wirklich etwas Neues sagt
+              (z.B. "Frei (Urlaub)"). */}
+          {sub && <span className="truncate">{sub}</span>}
         </span>
       )}
+
+      {/* Kommentar wird bewusst NICHT mehr auf der Kachel angezeigt - bei
+          einem belegten Platz war das zu viel Text auf zu engem Raum; er
+          bleibt im Detail-Panel nach Klick sichtbar. */}
     </div>
   );
 }

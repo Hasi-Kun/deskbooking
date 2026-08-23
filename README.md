@@ -67,8 +67,13 @@ Platz-Zustände (frei/belegt) nutzen bewusst feste Signalfarben und **nicht**
 die Akzentfarbe, damit sie bei jeder Farbwahl lesbar bleiben. Klick wechselt den im
 Grundriss gezeigten Tag.
 
-Klick auf einen Platz öffnet ein Panel **neben dem Platz** (kein Fenster) mit
-Notizfeld und optionaler Mehrtages-Buchung. Belegte Tage werden dabei
+Klick auf einen Platz öffnet ein Panel **neben dem Platz** (kein Fenster). Dort
+wählt man das **Zeitfenster** — Ganztags, Vormittag oder Nachmittag. Zwei
+Personen können sich einen Platz teilen (Vor-/Nachmittag); bereits vergebene
+Zeitfenster sind durchgestrichen und nicht wählbar. Im Grundriss selbst zeigt
+ein belegter Platz nur das **Avatar-Symbol** (Initialen) — wer genau dort
+sitzt, steht erst im aufgeklappten Panel. Dazu Notizfeld und optionale
+Mehrtages-Buchung. Belegte Tage werden dabei
 übersprungen statt die ganze Aktion abzubrechen.
 
 ### Belegung (Gantt)
@@ -76,6 +81,15 @@ Notizfeld und optionaler Mehrtages-Buchung. Belegte Tage werden dabei
 Zeigt je Platz eine Zeile über den gewählten Zeitraum. Es werden **nur
 Werktage (Mo–Fr)** dargestellt und gewertet — Wochenenden würden die
 Auslastungsquote sonst künstlich drücken.
+
+### Konferenztische
+
+Ein Platz mit **Kapazität > 1** (im Editor einstellbar) wird zum Konferenztisch:
+Beim Buchen erscheint zusätzlich eine Teilnehmer-Auswahl — eine Person bucht
+stellvertretend für die Gruppe und wählt Kolleg:innen aus einer Mehrfachauswahl
+dazu. Die Kapazität begrenzt die Gesamtgröße (Buchende Person + Teilnehmende).
+Im Grundriss zeigt eine Gruppenbuchung „Belegt · +N“, die vollständige
+Teilnehmerliste mit Avataren steht im aufgeklappten Buchungs-Panel.
 
 ### Layout-Editor (nur Admins)
 
@@ -86,12 +100,14 @@ Auslastungsquote sonst künstlich drücken.
   bei Auswahl erscheinen Griffe an den Enden für Länge und Winkel.
 - **Fenster** werden als Mauer mit hellem Glasband dargestellt — erkennbar als
   Wandöffnung.
-- **Bearbeiten:** Klick auf ein Element öffnet ein Panel daneben. `Entf` löscht
-  ohne Rückfrage.
+- **Bearbeiten:** *Rechtsklick* auf ein Element öffnet ein Kontextmenü mit
+  seinen Eigenschaften; ein einfacher Linksklick wählt nur aus (zum Verschieben
+  per Ziehen). `Entf` löscht die Auswahl ohne Rückfrage.
 - **Speichern:** Der Editor speichert **nicht** automatisch. Änderungen sammeln
   sich und werden über „Speichern" (Strg/Cmd + S) gebündelt übertragen. Der
   Status oben rechts zeigt „Nicht gespeichert" bzw. die Uhrzeit. Neu angelegte
   und gelöschte Elemente wirken sofort, weil sie serverseitig eine ID brauchen.
+- **Kapazität:** Für Konferenztische auf > 1 setzen (Standard: 1 = Einzelplatz).
 - **Fläche:** Breite und Höhe per Regler live veränderbar (400–4000 px); das
   Punktraster wächst mit. Unten rechts steuert eine Zoom-Leiste die Ansicht
   („Fit" passt in die Fensterbreite ein, +/− zoomt zwischen 25 % und 200 %).
@@ -102,11 +118,44 @@ Konten anlegen, Rolle wechseln, Passwort zurücksetzen (meldet alle Sitzungen de
 Person ab), deaktivieren/aktivieren, 2FA im Notfall zurücksetzen. Es gibt
 bewusst keine Selbstregistrierung.
 
+### Anmeldung
+
+Zweistufig: zuerst nur die **E-Mail-Adresse**, danach die Wahl zwischen
+**Passkey** und **Passwort** (mit optionalem zweitem Faktor). Beide Optionen
+erscheinen unabhängig davon, ob das Konto existiert oder Passkeys hinterlegt
+hat — sonst würde diese Seite selbst zur Auskunftsquelle über Kontodaten.
+
+Läuft die Sitzung ab (Cookie ungültig/abgelaufen), erscheint auf jeder Seite
+ein Hinweis „Sitzung abgelaufen“, der aktiv bestätigt werden muss und zur
+Anmeldung zurückführt.
+
+### Chat
+
+Ausklappbares Panel unten rechts (Zahnrad-Nachbar), erreichbar von jeder Seite.
+Zwei Bereiche: **Global** (ein Kanal für alle) und **Direkt** (1:1, mit
+Personensuche über alle aktiven Kolleg:innen). Ein rotes Abzeichen am
+Chat-Knopf zeigt ungelesene Direktnachrichten. Aktualisierung per Abfrage
+alle 4 Sekunden (kein WebSocket-Server) — für ein internes Büro-Tool
+ausreichend und ohne zusätzliche Infrastruktur.
+
 ### Konto
 
 Passwort ändern und **Zwei-Faktor** einrichten: QR-Code scannen, Code
 bestätigen. 2FA wird erst nach erfolgreicher Bestätigung scharf — ein
 fehlgeschlagener Scan sperrt also niemanden aus.
+
+**Passkeys / Sicherheitsschlüssel** (YubiKey, Touch ID, Windows Hello) lassen
+sich zusätzlich hinterlegen — im Konto unter „Passkeys hinzufügen". Beim Login
+ersetzt „Mit Passkey anmelden" dann Passwort und Authenticator-Code komplett.
+Technisch: WebAuthn/FIDO2 über die native Browser-API, keine Fremdbibliothek
+im Frontend nötig. Die Challenge lebt serverseitig maximal 5 Minuten und wird
+nach Gebrauch sofort gelöscht (Schutz vor Replay).
+
+Direkt danach erscheinen **10 Einmal-Codes** (Format `XXXX-XXXX`). Sie werden
+genau einmal im Klartext gezeigt; gespeichert wird nur ihr Hash. Jeder Code
+funktioniert einmal und ersetzt bei der Anmeldung den Authenticator-Code — die
+Absicherung für ein verlorenes Telefon. Über „Neue Einmal-Codes" lässt sich ein
+frischer Satz erzeugen, wodurch alle alten ungültig werden.
 
 ---
 
@@ -123,6 +172,12 @@ Fünf unabhängige Farben, jeweils mit vollem Farbwähler
 | **Akzent** | Buttons, Auswahl, freie Plätze, Ampel |
 | **Verlauf links / Mitte / rechts** | Verlauf `to right` über drei Stufen |
 | **Hintergrund-Schein** | dezenter Lichtschein hinter der Seite |
+
+Zusätzlich individuell im **Konto**: ein **Namensstil** (Glitzer-Effekt) mit
+frei wählbarer Farbe. Das Textur-Bild liegt fest im Projekt
+(`frontend/public/sparkles/white.gif`) — keine Abhängigkeit von einem
+externen Host. Der Stil erscheint überall, wo der Name auftaucht: Grundriss,
+Buchungs-Panel, Chat.
 
 Verlauf und Schein sind **bewusst nicht** an den Akzent gekoppelt — sie lassen
 sich frei kombinieren. „Zurücksetzen" stellt die `.env`-Werte wieder her.
@@ -187,11 +242,13 @@ richtige Werkzeug.
 
 ## 7. Grenzen / Ausbaustufen
 
-- Buchung ist tagesbasiert, keine Stunden-Slots.
+- Zeitfenster sind Ganztags / Vormittag / Nachmittag — keine freie
+  Stundenauswahl.
 - Kein Grundriss-Import als Hintergrundbild.
 - Keine E-Mail-Benachrichtigungen.
-- 2FA ohne Backup-Codes — bei Telefonverlust hilft ein Admin über
-  „2FA zurücksetzen". WebAuthn/Passkeys wären die stärkere Alternative.
+- Keine Mehrpersonen-Buchung für Besprechungstische (ein Platz = eine Person).
+- Chat ist bewusst schlank: kein Löschen/Bearbeiten von Nachrichten, keine
+  Datei-Anhänge, kein Gruppen-Chat außer dem einen globalen Kanal.
 - Zeitraum-Buchung auf 92 Tage begrenzt.
 - Stornierte Buchungen werden gelöscht, nicht als „cancelled" behalten.
 

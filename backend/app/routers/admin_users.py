@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -35,6 +35,29 @@ async def create_user(payload: AdminUserCreate, admin: User = Depends(require_ad
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@router.delete("/{user_id}", dependencies=[Depends(verify_csrf)])
+async def delete_user(user_id: str, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Löscht das Konto endgültig (nicht nur deaktivieren). Buchungen,
+    Nachrichten, Passkeys usw. hängen per ON DELETE CASCADE an users.id und
+    verschwinden automatisch mit; Audit-Log-Einträge bleiben erhalten
+    (dort ist die FK auf SET NULL gestellt) - die Historie geht also nicht
+    verloren, nur der Bezug zur gelöschten Person."""
+    if user_id == admin.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Eigenes Konto kann nicht gelöscht werden")
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Nutzer nicht gefunden")
+    if user.role == Role.admin:
+        remaining = await db.scalar(
+            select(func.count()).select_from(User).where(User.role == Role.admin, User.id != user_id)
+        )
+        if not remaining:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Der letzte Administrator kann nicht gelöscht werden")
+    await db.delete(user)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.patch("/{user_id}/deactivate", dependencies=[Depends(verify_csrf)])

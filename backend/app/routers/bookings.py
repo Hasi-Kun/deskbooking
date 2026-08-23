@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -6,11 +6,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import Booking, Desk, User, BookingStatus, BookingSlot, BookingAttendee, AuditLog
+from ..models import Booking, Desk, User, BookingStatus, BookingSlot, BookingAttendee, AuditLog, Absence
 from ..schemas import BookingCreate, BookingOut, BookingRangeCreate, AttendeeOut
 from ..deps import get_current_user, verify_csrf
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
+
+
+async def _desk_temporarily_free(db: AsyncSession, desk: Desk, on_date: date) -> bool:
+    """Ein fest zugewiesener Platz gilt an diesem Tag als frei, wenn entweder
+    (a) der Tag laut Desk.fixed_days kein "Büro-Tag" der zugewiesenen Person
+    ist (z.B. ihr Homeoffice-Tag), oder (b) sie an dem Tag im Urlaub ist."""
+    if not desk.fixed_user_id:
+        return False
+    fixed_days = {int(x) for x in desk.fixed_days.split(",") if x != ""}
+    if on_date.weekday() not in fixed_days:
+        return True
+    hit = await db.scalar(
+        select(Absence).where(
+            Absence.user_id == desk.fixed_user_id,
+            Absence.date_from <= on_date, Absence.date_to >= on_date,
+        )
+    )
+    return hit is not None
 
 
 def _parse_slot(value: str) -> BookingSlot:
@@ -19,6 +37,11 @@ def _parse_slot(value: str) -> BookingSlot:
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                              "Zeitfenster muss full, morning oder afternoon sein")
+
+
+def _parse_hhmm(value: str) -> time:
+    h, m = value.split(":")
+    return time(int(h), int(m))
 
 
 def _conflicting_slots(slot: BookingSlot) -> list[BookingSlot]:
@@ -48,6 +71,8 @@ def _to_out(b: Booking) -> BookingOut:
         user_name_style=b.user.name_style, user_name_style_color=b.user.name_style_color,
         booking_date=b.booking_date, status=b.status.value,
         slot=b.slot.value if b.slot else "full",
+        start_time=b.start_time.strftime("%H:%M") if b.start_time else None,
+        end_time=b.end_time.strftime("%H:%M") if b.end_time else None,
         comment=b.comment or "", attendees=attendees, created_at=b.created_at,
     )
 
@@ -121,54 +146,103 @@ async def create_booking(payload: BookingCreate, request: Request,
     desk = await db.get(Desk, payload.desk_id)
     if not desk or not desk.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Platz nicht verfügbar")
-    if desk.fixed_user_id:
+    if desk.fixed_user_id and not await _desk_temporarily_free(db, desk, payload.booking_date):
         raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist fest zugewiesen und nicht buchbar")
-
-    slot = _parse_slot(payload.slot)
-    blocking = _conflicting_slots(slot)
-
-    # Ist der Platz im gewuenschten Zeitfenster schon vergeben?
-    taken = await db.scalar(
-        select(Booking).where(
-            Booking.desk_id == desk.id,
-            Booking.booking_date == payload.booking_date,
-            Booking.status == BookingStatus.confirmed,
-            Booking.slot.in_(blocking),
-        )
-    )
-    if taken:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Dieser Platz ist an dem Tag bereits {SLOT_LABEL[taken.slot]} belegt",
-        )
-
-    # Ein Nutzer darf sich nicht selbst doppelt einbuchen (gleiches Zeitfenster).
-    own = await db.scalar(
-        select(Booking).where(
-            Booking.user_id == user.id,
-            Booking.booking_date == payload.booking_date,
-            Booking.status == BookingStatus.confirmed,
-            Booking.slot.in_(blocking),
-        )
-    )
-    if own:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Du hast für diesen Tag bereits {SLOT_LABEL[own.slot]} einen Platz gebucht",
-        )
 
     # Zusaetzliche Teilnehmende validieren, BEVOR die Buchung angelegt wird -
     # so entsteht bei einem ungueltigen Teilnehmer keine halbe Buchung.
     attendees = await _resolve_attendees(db, desk, user.id, payload.attendee_ids)
 
-    booking = Booking(desk_id=desk.id, user_id=user.id, booking_date=payload.booking_date,
-                       slot=slot, comment=payload.comment.strip())
+    if desk.capacity > 1:
+        # Konferenztisch: Uhrzeitfenster statt ganztags/halbtags - mehrere,
+        # zeitlich getrennte Meetings pro Tag sind moeglich.
+        if not payload.start_time or not payload.end_time:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bitte Start- und Endzeit angeben")
+        start_t = _parse_hhmm(payload.start_time)
+        end_t = _parse_hhmm(payload.end_time)
+        if end_t <= start_t:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Endzeit muss nach der Startzeit liegen")
+
+        overlap = await db.scalar(
+            select(Booking).where(
+                Booking.desk_id == desk.id,
+                Booking.booking_date == payload.booking_date,
+                Booking.status == BookingStatus.confirmed,
+                Booking.start_time < end_t, Booking.end_time > start_t,
+            )
+        )
+        if overlap:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Der Tisch ist von {overlap.start_time.strftime('%H:%M')} bis "
+                f"{overlap.end_time.strftime('%H:%M')} bereits belegt",
+            )
+
+        # Ausnahme-Regel: gibt es mehrere Konferenztische, kann trotzdem
+        # jede Person nur an EINEM gleichzeitig sitzen - unabhaengig davon,
+        # in welchem Raum. Deshalb auch ueber alle anderen Konferenztische
+        # hinweg auf eine zeitliche Ueberschneidung der eigenen Buchungen pruefen.
+        own_meeting_overlap = await db.scalar(
+            select(Booking).join(Desk, Booking.desk_id == Desk.id).where(
+                Booking.user_id == user.id,
+                Booking.booking_date == payload.booking_date,
+                Booking.status == BookingStatus.confirmed,
+                Desk.capacity > 1,
+                Booking.start_time < end_t, Booking.end_time > start_t,
+            )
+        )
+        if own_meeting_overlap:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Du hast für diesen Zeitraum bereits einen anderen Konferenztisch gebucht",
+            )
+
+        booking = Booking(desk_id=desk.id, user_id=user.id, booking_date=payload.booking_date,
+                           slot=BookingSlot.full, start_time=start_t, end_time=end_t,
+                           comment=payload.comment.strip())
+    else:
+        slot = _parse_slot(payload.slot)
+        blocking = _conflicting_slots(slot)
+
+        # Ist der Platz im gewuenschten Zeitfenster schon vergeben?
+        taken = await db.scalar(
+            select(Booking).where(
+                Booking.desk_id == desk.id,
+                Booking.booking_date == payload.booking_date,
+                Booking.status == BookingStatus.confirmed,
+                Booking.slot.in_(blocking),
+            )
+        )
+        if taken:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Dieser Platz ist an dem Tag bereits {SLOT_LABEL[taken.slot]} belegt",
+            )
+
+        # Ein Nutzer darf sich nicht selbst doppelt einbuchen (gleiches Zeitfenster).
+        own = await db.scalar(
+            select(Booking).where(
+                Booking.user_id == user.id,
+                Booking.booking_date == payload.booking_date,
+                Booking.status == BookingStatus.confirmed,
+                Booking.slot.in_(blocking),
+            )
+        )
+        if own:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Du hast für diesen Tag bereits {SLOT_LABEL[own.slot]} einen Platz gebucht",
+            )
+
+        booking = Booking(desk_id=desk.id, user_id=user.id, booking_date=payload.booking_date,
+                           slot=slot, comment=payload.comment.strip())
+
     db.add(booking)
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist für den gewählten Tag bereits belegt")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist für den gewählten Zeitraum bereits belegt")
 
     for a in attendees:
         db.add(BookingAttendee(booking_id=booking.id, user_id=a.id))
@@ -214,8 +288,11 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
     desk = await db.get(Desk, payload.desk_id)
     if not desk or not desk.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Platz nicht verfügbar")
-    if desk.fixed_user_id:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Platz ist fest zugewiesen und nicht buchbar")
+    if desk.capacity > 1:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Konferenztische werden mit Uhrzeiten für einzelne Tage gebucht, nicht als Zeitraum",
+        )
 
     slot = _parse_slot(payload.slot)
     blocking = _conflicting_slots(slot)
@@ -229,6 +306,14 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
     while current <= payload.date_to:
         # Wochenenden optional ueberspringen (Mo=0 ... So=6)
         if current < today or (payload.skip_weekends and current.weekday() >= 5):
+            current += timedelta(days=1)
+            continue
+
+        # Fest zugewiesene Tage (Büro-Tage der Person) werden übersprungen
+        # statt die ganze Aktion abzulehnen - so lässt sich ein Zeitraum über
+        # Homeoffice-Tage/Urlaub hinweg buchen, ohne Büro-Tage zu verletzen.
+        if desk.fixed_user_id and not await _desk_temporarily_free(db, desk, current):
+            skipped.append(current.isoformat())
             current += timedelta(days=1)
             continue
 

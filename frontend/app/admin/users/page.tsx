@@ -6,6 +6,8 @@ import AppShell from "../../components/AppShell";
 import { useAppData } from "../../components/AppDataProvider";
 import Button from "../../components/ui/Button";
 import Dialog from "../../components/ui/Dialog";
+import AlertDialog from "../../components/ui/AlertDialog";
+import Avatar from "../../components/ui/Avatar";
 import { ListSkeleton } from "../../components/ui/Skeleton";
 
 export default function UserAdmin() {
@@ -18,6 +20,7 @@ export default function UserAdmin() {
   const [notice, setNotice] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [resetFor, setResetFor] = useState<AdminUser | null>(null);
+  const [deleteFor, setDeleteFor] = useState<AdminUser | null>(null);
   const [query, setQuery] = useState("");
 
   const [form, setForm] = useState({ email: "", full_name: "", password: "", role: "user" });
@@ -94,9 +97,8 @@ export default function UserAdmin() {
                  className="group/user flex flex-wrap items-center gap-3 rounded-xl2 border border-line
                             bg-surface p-3 transition-all duration-200 hover:border-accent/40 hover:shadow-sm">
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold
-                              text-accent-ink transition-transform duration-200 group-hover/user:scale-105"
-                   style={{ background: "var(--accent)" }}>
-                {u.full_name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                              text-accent-ink transition-transform duration-200 group-hover/user:scale-105">
+                <Avatar name={u.full_name} src={u.avatar_url} size={36} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -139,6 +141,11 @@ export default function UserAdmin() {
                       Aktivieren
                     </Button>
                   )
+                )}
+                {u.id !== me?.id && (
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => setDeleteFor(u)}>
+                    Löschen
+                  </Button>
                 )}
               </div>
             </div>
@@ -206,6 +213,21 @@ export default function UserAdmin() {
       >
         <Input label="Neues Passwort (mind. 10 Zeichen)" type="text" value={newPassword} onChange={setNewPassword} />
       </Dialog>
+
+      {/* Konto endgueltig loeschen */}
+      <AlertDialog
+        open={!!deleteFor}
+        title={`„${deleteFor?.full_name ?? ""}“ endgültig löschen?`}
+        description="Buchungen, Nachrichten und Passkeys dieser Person werden mit gelöscht. Das lässt sich nicht rückgängig machen - zum bloßen Sperren reicht „Deaktivieren“."
+        actionLabel="Endgültig löschen"
+        actionBusy={busy}
+        onAction={() => act(async () => {
+          await api(`/api/admin/users/${deleteFor!.id}`, { method: "DELETE" });
+          setDeleteFor(null);
+        }, "Konto gelöscht")}
+        cancelLabel="Abbrechen"
+        onCancel={() => setDeleteFor(null)}
+      />
     </AppShell>
   );
 }

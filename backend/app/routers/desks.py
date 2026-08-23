@@ -11,6 +11,19 @@ from ..deps import get_current_user, require_admin, verify_csrf
 router = APIRouter(prefix="/api/desks", tags=["desks"])
 
 
+def _fixed_days_list(csv: str) -> list[int]:
+    try:
+        return [int(x) for x in csv.split(",") if x != ""]
+    except ValueError:
+        return [0, 1, 2, 3, 4]
+
+
+def _fixed_days_csv(days: list[int]) -> str:
+    # 0=Montag ... 6=Sonntag (Python date.weekday()); Duplikate raus, sortiert.
+    uniq = sorted({d for d in days if 0 <= d <= 6})
+    return ",".join(str(d) for d in uniq)
+
+
 def _to_out(d: Desk) -> DeskOut:
     return DeskOut(
         id=d.id, name=d.name, floor_id=d.floor_id, zone=d.zone,
@@ -20,6 +33,7 @@ def _to_out(d: Desk) -> DeskOut:
         fixed_user_style=d.fixed_user.name_style if d.fixed_user else "plain",
         fixed_user_style_color=d.fixed_user.name_style_color if d.fixed_user else "#35E0C0",
         capacity=d.capacity,
+        fixed_days=_fixed_days_list(d.fixed_days),
     )
 
 
@@ -59,6 +73,9 @@ async def update_desk(desk_id: str, payload: DeskUpdate,
         target = await db.get(User, data["fixed_user_id"])
         if not target:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nutzer für feste Zuweisung nicht gefunden")
+
+    if "fixed_days" in data and data["fixed_days"] is not None:
+        data["fixed_days"] = _fixed_days_csv(data["fixed_days"])
 
     for field, value in data.items():
         setattr(desk, field, value)

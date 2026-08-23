@@ -12,11 +12,28 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..deps import get_current_user, verify_csrf
+from ..deps import get_current_user, verify_csrf, require_admin
 from ..models import Message, User
 from ..schemas import MessageCreate, MessageOut, ConversationOut, DirectoryUser
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def _mentions_csv(ids: list[str]) -> str:
+    """",id1,id2," - siehe Kommentar am Message-Modell zum Substring-Check."""
+    uniq = list(dict.fromkeys(i for i in ids if i))
+    return ("," + ",".join(uniq) + ",") if uniq else ""
+
+
+def _mentions_list(csv: str) -> list[str]:
+    return [i for i in csv.split(",") if i]
+
+
+async def _resolve_mentions(db: AsyncSession, ids: list[str]) -> list[str]:
+    if not ids:
+        return []
+    rows = await db.scalars(select(User.id).where(User.id.in_(ids), User.is_active.is_(True)))
+    return list(rows.all())
 
 
 @router.get("/directory", response_model=list[DirectoryUser])
@@ -34,8 +51,10 @@ def _to_out(m: Message) -> MessageOut:
     return MessageOut(
         id=m.id, channel=m.channel, sender_id=m.sender_id,
         sender_name=m.sender.full_name, sender_name_style=m.sender.name_style,
-        sender_name_style_color=m.sender.name_style_color,
-        recipient_id=m.recipient_id, body=m.body, created_at=m.created_at,
+        sender_name_style_color=m.sender.name_style_color, sender_avatar_url=m.sender.avatar_url,
+        sender_online=m.sender.online,
+        recipient_id=m.recipient_id, body=m.body, mentioned_user_ids=_mentions_list(m.mentions),
+        created_at=m.created_at,
     )
 
 
@@ -55,11 +74,53 @@ async def global_messages(
 
 @router.post("/global", response_model=MessageOut, dependencies=[Depends(verify_csrf)])
 async def send_global(payload: MessageCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    msg = Message(channel="global", sender_id=user.id, recipient_id=None, body=payload.body.strip())
+    mentioned = await _resolve_mentions(db, payload.mentioned_user_ids)
+    msg = Message(channel="global", sender_id=user.id, recipient_id=None, body=payload.body.strip(),
+                  mentions=_mentions_csv(mentioned))
     db.add(msg)
     await db.commit()
     await db.refresh(msg, attribute_names=["sender"])
     return _to_out(msg)
+
+
+@router.delete("/messages/{message_id}", dependencies=[Depends(verify_csrf)])
+async def delete_message(message_id: str, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Admin-Moderation: eine einzelne Nachricht entfernen (global oder DM)."""
+    msg = await db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Nachricht nicht gefunden")
+    await db.delete(msg)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/global", dependencies=[Depends(verify_csrf)])
+async def clear_global(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Admin-Moderation: den gesamten globalen Kanal leeren."""
+    await db.execute(Message.__table__.delete().where(Message.channel == "global"))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/mentions/unread-count")
+async def mentions_unread_count(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Badge am Chat-Reiter - NUR eigene Erwähnungen seit dem letzten Ansehen,
+    nicht der ganze ungelesene globale Kanal."""
+    since = user.last_mention_seen_at
+    stmt = select(func.count(Message.id)).where(
+        Message.channel == "global", Message.mentions.contains(f",{user.id},")
+    )
+    if since:
+        stmt = stmt.where(Message.created_at > since)
+    n = await db.scalar(stmt)
+    return {"unread": n or 0}
+
+
+@router.post("/mentions/seen", dependencies=[Depends(verify_csrf)])
+async def mark_mentions_seen(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    user.last_mention_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -85,6 +146,7 @@ async def list_conversations(user: User = Depends(get_current_user), db: AsyncSe
             seen[other.id] = ConversationOut(
                 user_id=other.id, user_name=other.full_name,
                 user_name_style=other.name_style, user_name_style_color=other.name_style_color,
+                user_avatar_url=other.avatar_url, user_online=other.online,
                 last_message=m.body, last_at=m.created_at, unread=0,
             )
     for conv in seen.values():

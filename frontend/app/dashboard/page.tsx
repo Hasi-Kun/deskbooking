@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, ApiError, Booking, BookingSlot, Desk, Floor, SceneObject, User } from "@/lib/api";
+import { api, ApiError, Absence, Booking, BookingSlot, Desk, Floor, SceneObject, User } from "@/lib/api";
 import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import FloorCanvas from "../components/FloorCanvas";
@@ -12,6 +12,7 @@ import Button from "../components/ui/Button";
 import { FloorSkeleton } from "../components/ui/Skeleton";
 import PeriodNavigator, { RangeMode } from "../components/ui/PeriodNavigator";
 import { toISO, fromISO, formatLong } from "../components/ui/DatePicker";
+import ChatDock from "../components/ChatDock";
 
 function addDays(iso: string, days: number) {
   const d = fromISO(iso);
@@ -47,6 +48,7 @@ export default function Dashboard() {
   const [objects, setObjects] = useState<SceneObject[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [mine, setMine] = useState<Booking[]>([]);
+  const [absences, setAbsences] = useState<Absence[]>([]);
 
   const [rangeMode, setRangeMode] = useState<RangeMode>("day");
   const [anchor, setAnchor] = useState(toISO(new Date()));
@@ -70,34 +72,40 @@ export default function Dashboard() {
     return custom;
   }, [rangeMode, anchor, custom]);
 
-  // Alle Tage des Zeitraums (fuer die Tagesleiste)
+  // Alle Werktage des Zeitraums (fuer die Tagesleiste) - Wochenenden werden
+  // ausgelassen, genau wie in der Belegungsübersicht. Bleibt dabei nichts
+  // übrig (z.B. eine einzelne Tagesansicht, die theoretisch auf einem
+  // Wochenende landet), lieber den Tag trotzdem zeigen als eine leere Leiste.
   const days = useMemo(() => {
     const out: string[] = [];
     let cur = period.from;
     let guard = 0;
     while (cur <= period.to && guard++ < 200) {
-      out.push(cur);
+      const wd = fromISO(cur).getDay();
+      if (wd !== 0 && wd !== 6) out.push(cur);
       cur = addDays(cur, 1);
     }
-    return out;
+    return out.length ? out : [period.from];
   }, [period]);
 
   useEffect(() => {
-    // Fokustag immer innerhalb des Zeitraums halten
-    if (focusDay < period.from || focusDay > period.to) setFocusDay(period.from);
-  }, [period, focusDay]);
+    // Fokustag immer innerhalb der (werktags-gefilterten) Tagesliste halten
+    if (!days.includes(focusDay)) setFocusDay(days[0]);
+  }, [days, focusDay]);
 
   const loadFloorData = useCallback(async (fId: string, from: string, to: string) => {
-    const [desksRes, objectsRes, bookingsRes, mineRes] = await Promise.all([
+    const [desksRes, objectsRes, bookingsRes, mineRes, absencesRes] = await Promise.all([
       api<Desk[]>(`/api/desks?floor_id=${fId}`),
       api<SceneObject[]>(`/api/scene?floor_id=${fId}`),
       api<Booking[]>(`/api/bookings?date_from=${from}&date_to=${to}`),
       api<Booking[]>("/api/bookings/mine"),
+      api<Absence[]>(`/api/absences?date_from=${from}&date_to=${to}`),
     ]);
     setDesks(desksRes);
     setObjects(objectsRes);
     setBookings(bookingsRes);
     setMine(mineRes);
+    setAbsences(absencesRes);
   }, []);
 
   useEffect(() => {
@@ -133,11 +141,13 @@ export default function Dashboard() {
     if (floorId) await loadFloorData(floorId, period.from, period.to);
   }
 
-  async function handleConfirm({ comment, slot, attendeeIds, range }: {
+  async function handleConfirm({ comment, slot, attendeeIds, range, startTime, endTime }: {
     comment: string;
     slot: BookingSlot;
     attendeeIds: string[];
     range?: { from: string; to: string; skipWeekends: boolean };
+    startTime?: string;
+    endTime?: string;
   }) {
     if (!popover) return;
     if (range) {
@@ -157,7 +167,10 @@ export default function Dashboard() {
     } else {
       await api<Booking>("/api/bookings", {
         method: "POST",
-        body: JSON.stringify({ desk_id: popover.desk.id, booking_date: focusDay, slot, comment, attendee_ids: attendeeIds }),
+        body: JSON.stringify({
+          desk_id: popover.desk.id, booking_date: focusDay, slot, comment, attendee_ids: attendeeIds,
+          start_time: startTime, end_time: endTime,
+        }),
       });
     }
     await reload();
@@ -195,16 +208,46 @@ export default function Dashboard() {
     return map;
   }, [bookings, focusDay]);
 
-  /** Ein Platz gilt als voll, wenn ganztags gebucht ist oder beide Halbtage weg sind. */
-  const isFullyBooked = (deskId: string) => {
-    const list = bookingByDesk.get(deskId) ?? [];
+  // Nutzer, die am Fokustag im Urlaub sind - Grundlage dafür, ob ein fester
+  // Platz heute als frei gilt.
+  const absentUserIds = useMemo(() => {
+    const set = new Set<string>();
+    absences
+      .filter((a) => a.date_from <= focusDay && a.date_to >= focusDay)
+      .forEach((a) => set.add(a.user_id));
+    return set;
+  }, [absences, focusDay]);
+
+  // Ein fest zugewiesener Platz gilt am Fokustag als frei, wenn die Person
+  // entweder im Urlaub ist ODER der Tag laut Desk.fixed_days gar kein
+  // "Büro-Tag" für sie ist (z.B. ihr Homeoffice-Tag Mi/Fr).
+  const focusWeekday = (fromISO(focusDay).getDay() + 6) % 7; // Montag=0...Sonntag=6
+  const absentFixedDeskIds = useMemo(() => {
+    const set = new Set<string>();
+    desks.forEach((d) => {
+      if (!d.fixed_user_id) return;
+      const isOfficeDay = d.fixed_days.includes(focusWeekday);
+      if (!isOfficeDay || absentUserIds.has(d.fixed_user_id)) set.add(d.id);
+    });
+    return set;
+  }, [desks, absentUserIds, focusWeekday]);
+
+  /** Ein normaler Einzelplatz gilt als voll, wenn ganztags gebucht ist oder
+   *  beide Halbtage weg sind. Konferenztische zählen hier immer als "frei" -
+   *  ihre Belegung ist zeitfensterbasiert (mehrere Meetings pro Tag möglich),
+   *  ein einzelnes Tages-Ja/Nein passt darauf nicht mehr. */
+  const isFullyBooked = (desk: Desk) => {
+    if (desk.capacity > 1) return false;
+    const list = bookingByDesk.get(desk.id) ?? [];
     return list.some((b) => b.slot === "full") || list.length >= 2;
   };
   const currentFloor = floors.find((f) => f.id === floorId);
   const myBookingToday = mine.find((b) => b.booking_date === focusDay);
 
   const activeDesks = useMemo(() => desks.filter((d) => d.is_active), [desks]);
-  const freeCount = activeDesks.filter((d) => !d.fixed_user_id && !isFullyBooked(d.id)).length;
+  const freeCount = activeDesks.filter(
+    (d) => (!d.fixed_user_id || absentFixedDeskIds.has(d.id)) && !isFullyBooked(d)
+  ).length;
 
   if (loading) {
     return (
@@ -287,6 +330,7 @@ export default function Dashboard() {
               objects={objects}
               bookingByDesk={bookingByDesk}
               currentUserId={user.id}
+              absentFixedDeskIds={absentFixedDeskIds}
               onDeskClick={(desk, list, rect) => setPopover({ desk, bookings: list, rect })}
             />
           </div>
@@ -331,7 +375,9 @@ export default function Dashboard() {
         onClose={() => setPopover(null)}
         onBook={handleConfirm}
         onCancel={handleCancel}
+        temporarilyFree={!!popover?.desk && absentFixedDeskIds.has(popover.desk.id)}
       />
+      {user && <ChatDock currentUser={user} />}
     </AppShell>
   );
 }

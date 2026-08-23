@@ -177,6 +177,17 @@ async def me(user: User = Depends(get_current_user)):
     return user
 
 
+@router.post("/heartbeat", dependencies=[Depends(verify_csrf)])
+async def heartbeat(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Wird alle ~25s vom Frontend aufgerufen, solange eine Seite offen ist -
+    Grundlage fuer den Online-Status im Chat (siehe User.is_online). Bewusst
+    ein simpler Zeitstempel statt eines Presence-Servers/WebSockets, das
+    reicht fuer ein internes Buero-Tool voellig aus."""
+    user.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/change-password", dependencies=[Depends(verify_csrf)])
 async def change_password(payload: ChangePasswordRequest, request: Request,
                            user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):

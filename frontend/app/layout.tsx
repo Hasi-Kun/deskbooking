@@ -4,6 +4,7 @@ import BrandProvider from "./components/BrandProvider";
 import { ThemeProvider } from "./components/ThemeToggle";
 import AppDataProvider from "./components/AppDataProvider";
 import SessionExpiredProvider from "./components/SessionExpiredProvider";
+import ContextMenuGuard from "./components/ContextMenuGuard";
 
 export const metadata: Metadata = {
   title: "Deskbooking",
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </AppDataProvider>
           </BrandProvider>
         </ThemeProvider>
+        <ContextMenuGuard />
       </body>
     </html>
   );

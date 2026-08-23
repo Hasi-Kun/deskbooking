@@ -84,6 +84,14 @@ export default function ElementPopover({
                   ))}
                 </select>
               </Field>
+              {desk.fixed_user_id && (
+                <Field label="Büro-Tage" hint="an den anderen Tagen ist der Platz frei">
+                  <WeekdayPicker
+                    value={desk.fixed_days}
+                    onChange={(days) => onEditDesk(desk.id, { fixed_days: days })}
+                  />
+                </Field>
+              )}
               <Checkbox
                 id={`desk-active-${desk.id}`}
                 checked={desk.is_active}
@@ -146,21 +154,74 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+const WEEKDAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+/** Wochentags-Auswahl für "an welchen Tagen gilt die feste Zuweisung" - z.B.
+ *  Büro Mo/Di/Do, Homeoffice Mi/Fr. Tage außerhalb der Auswahl gelten als
+ *  frei buchbar für alle anderen. */
+function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (days: number[]) => void }) {
+  const toggle = (day: number) => {
+    const set = new Set(value);
+    if (set.has(day)) set.delete(day); else set.add(day);
+    onChange(Array.from(set).sort());
+  };
+  return (
+    <div className="grid grid-cols-7 gap-1">
+      {WEEKDAY_LABELS.map((label, day) => {
+        const active = value.includes(day);
+        return (
+          <button
+            key={day}
+            type="button"
+            onClick={() => toggle(day)}
+            aria-pressed={active}
+            title={active ? "Büro-Tag (Platz fest zugewiesen)" : "Frei buchbar an diesem Tag"}
+            className={[
+              "rounded-md py-1.5 text-[11px] font-medium transition-colors focus-ring",
+              active ? "text-accent-ink" : "bg-raised text-muted hover:text-ink",
+            ].join(" ")}
+            style={active ? { background: "var(--accent)" } : undefined}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Slider({
   label, unit, value, min, max, step, onChange,
 }: {
   label: string; unit: string; value: number; min: number; max: number; step: number;
   onChange: (v: number) => void;
 }) {
+  const pct = ((value - min) / (max - min)) * 100;
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <label className="text-[11px] font-medium text-muted">{label}</label>
-        <span className="text-[11px] tabular-nums text-muted">{Math.round(value)}{unit}</span>
+        {/* Zahl direkt editierbar statt nur Anzeige - deckt sich mit dem
+            "Slider + Zahlenfeld"-Muster aus den reui-Vorlagen. */}
+        <div className="flex items-center gap-1">
+          <input
+            type="number" min={min} max={max} step={step} value={Math.round(value)}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isNaN(v)) onChange(Math.max(min, Math.min(max, v)));
+            }}
+            className="w-14 rounded-md border border-line bg-raised px-1.5 py-0.5 text-right
+                       text-[11px] tabular-nums focus-ring"
+          />
+          <span className="text-[10px] text-muted">{unit}</span>
+        </div>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value}
-             onChange={(e) => onChange(+e.target.value)}
-             className="w-full accent-[var(--accent)]" />
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(+e.target.value)}
+        className="custom-range"
+        style={{ ["--range-pct" as any]: `${pct}%` }}
+      />
     </div>
   );
 }

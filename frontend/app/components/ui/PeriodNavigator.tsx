@@ -14,6 +14,22 @@ const addDays = (iso: string, n: number) => {
   return toISO(d);
 };
 
+/** Wie in der Belegungsübersicht: einen Kalendertag weiterbewegen und dabei
+ *  Wochenenden überspringen, statt auf ihnen zu landen. */
+const stepWorkday = (iso: string, dir: 1 | -1) => {
+  let cur = iso;
+  do {
+    cur = addDays(cur, dir);
+  } while ([0, 6].includes(fromISO(cur).getDay()));
+  return cur;
+};
+/** Fällt ein Datum auf ein Wochenende, auf den naechsten Werktag ziehen -
+ *  fuer Direktauswahl im Kalender (Tagesmodus) und den "Heute"-Sprung. */
+const toWorkday = (iso: string) => {
+  const wd = fromISO(iso).getDay();
+  return wd === 0 || wd === 6 ? stepWorkday(iso, 1) : iso;
+};
+
 /** Formatiert den Zeitraum so knapp wie möglich, ohne mehrdeutig zu werden:
  *  gleicher Monat -> "3.–9. März 2026", sonst "28. Feb – 6. März 2026". */
 function formatPeriod(mode: RangeMode, from: string, to: string) {
@@ -63,7 +79,7 @@ export default function PeriodNavigator({
   }, []);
 
   function step(dir: 1 | -1) {
-    if (mode === "day") return onAnchorChange(addDays(anchor, dir));
+    if (mode === "day") return onAnchorChange(stepWorkday(anchor, dir));
     if (mode === "week") return onAnchorChange(addDays(anchor, 7 * dir));
     if (mode === "month") {
       const d = fromISO(anchor);
@@ -134,7 +150,7 @@ export default function PeriodNavigator({
           Nur der Klick selbst ist deaktiviert, wenn man schon auf "heute" steht. */}
       <button
         onClick={() => {
-          onAnchorChange(todayISO);
+          onAnchorChange(toWorkday(todayISO));
           if (mode === "custom") onCustomChange(todayISO, addDays(todayISO, 6));
         }}
         disabled={isToday}
@@ -160,7 +176,7 @@ export default function PeriodNavigator({
             <div className="w-[302px]">
               <CalendarCard
                 value={anchor}
-                onApply={(iso) => { onAnchorChange(iso); setOpen(false); }}
+                onApply={(iso) => { onAnchorChange(mode === "day" ? toWorkday(iso) : iso); setOpen(false); }}
                 onCancel={() => setOpen(false)}
               />
             </div>

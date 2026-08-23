@@ -25,6 +25,9 @@ type Props = {
   src?: string | null;
   size?: number;
   badge?: BadgeTone;
+  /** Online-Status im Chat (grün/grau, wie bei Discord) - unabhängig vom
+   *  Buchungs-"badge" oben, da beide nie gleichzeitig gebraucht werden. */
+  online?: boolean;
   /** Ring in Hintergrundfarbe - für überlappende Gruppen. */
   ring?: boolean;
   title?: string;
@@ -35,7 +38,7 @@ type Props = {
  * dessen Farbton aus dem Namen abgeleitet ist. Der Statuspunkt sitzt unten
  * rechts.
  */
-export default function Avatar({ name, src, size = 32, badge = "none", ring, title }: Props) {
+export default function Avatar({ name, src, size = 32, badge = "none", online, ring, title }: Props) {
   const hue = hueFor(name);
   const dot = Math.max(8, Math.round(size * 0.3));
 
@@ -68,7 +71,17 @@ export default function Avatar({ name, src, size = 32, badge = "none", ring, tit
       )}
       <span className="sr-only">{name}</span>
 
-      {badge !== "none" && (
+      {online !== undefined ? (
+        <span
+          title={online ? "Online" : "Offline"}
+          aria-label={online ? "Online" : "Offline"}
+          className={[
+            "absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-surface",
+            online ? "bg-free" : "bg-muted/50",
+          ].join(" ")}
+          style={{ width: dot, height: dot }}
+        />
+      ) : badge !== "none" && (
         <span
           title={BADGE[badge].title}
           className={[

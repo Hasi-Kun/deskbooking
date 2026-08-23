@@ -438,30 +438,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Slider({
-  label, unit, value, min, max, step, onChange,
-}: {
-  label: string; unit: string; value: number; min: number; max: number; step: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div>
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <label className="text-xs font-medium text-muted">{label}</label>
-        <span className="text-[11px] text-muted tabular-nums">{Math.round(value)}{unit}</span>
-      </div>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(+e.target.value)}
-        className="w-full accent-[var(--accent)]"
-      />
-    </div>
-  );
-}
-
 function SizeControl({
   label, value, min, max, onChange,
 }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void }) {
+  const pct = ((value - min) / (max - min)) * 100;
   return (
     <div className="flex items-center gap-2">
       <span className="w-11 text-[11px] text-muted">{label}</span>
@@ -469,7 +449,8 @@ function SizeControl({
       <input
         type="range" min={min} max={max} step={20} value={value}
         onChange={(e) => onChange(+e.target.value)}
-        className="w-24 accent-[var(--accent)]"
+        className="custom-range w-24"
+        style={{ ["--range-pct" as any]: `${pct}%` }}
         aria-label={label}
       />
       <input

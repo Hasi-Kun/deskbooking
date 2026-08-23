@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { api, ApiError, Passkey, User } from "@/lib/api";
+import { api, ApiError, Absence, Passkey, User } from "@/lib/api";
 import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import Button from "../components/ui/Button";
@@ -10,8 +10,10 @@ import Dialog from "../components/ui/Dialog";
 import AlertDialog from "../components/ui/AlertDialog";
 import ColorPicker from "../components/ui/ColorPicker";
 import StyledName from "../components/StyledName";
+import Avatar from "../components/ui/Avatar";
 import { isWebAuthnSupported, createPasskey } from "@/lib/webauthn";
 import { Skeleton } from "../components/ui/Skeleton";
+import { DateRangePicker, formatLong, toISO, fromISO } from "../components/ui/DatePicker";
 
 type Status = User & { is_active: boolean; totp_enabled: boolean; backup_codes_remaining?: number };
 
@@ -47,6 +49,11 @@ export default function AccountPage() {
   const [nameStyleColor, setNameStyleColor] = useState("#35E0C0");
   const [disableOpen, setDisableOpen] = useState(false);
   const [disablePw, setDisablePw] = useState("");
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  const [absenceRange, setAbsenceRange] = useState({ from: toISO(new Date()), to: toISO(new Date()) });
+  const [absenceBusy, setAbsenceBusy] = useState(false);
 
   async function reload() {
     const s = await api<Status>("/api/auth/status");
@@ -60,12 +67,44 @@ export default function AccountPage() {
     setPasskeys(await api<Passkey[]>("/api/auth/webauthn"));
   }
 
+  async function reloadAbsences() {
+    setAbsences(await api<Absence[]>("/api/absences/mine"));
+  }
+
   useEffect(() => {
-    Promise.all([reload(), reloadPasskeys()])
+    Promise.all([reload(), reloadPasskeys(), reloadAbsences()])
       .catch(() => router.replace("/login"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function addAbsence() {
+    setAbsenceBusy(true); setError(null);
+    try {
+      await api("/api/absences", {
+        method: "POST",
+        body: JSON.stringify({ date_from: absenceRange.from, date_to: absenceRange.to }),
+      });
+      await reloadAbsences();
+      setNotice("Urlaub eingetragen");
+    } catch (e) {
+      setError((e as ApiError)?.message || "Konnte nicht eingetragen werden");
+    } finally {
+      setAbsenceBusy(false);
+    }
+  }
+
+  async function removeAbsence(id: string) {
+    setAbsenceBusy(true); setError(null);
+    try {
+      await api(`/api/absences/${id}`, { method: "DELETE" });
+      await reloadAbsences();
+    } catch (e) {
+      setError((e as ApiError)?.message || "Konnte nicht gelöscht werden");
+    } finally {
+      setAbsenceBusy(false);
+    }
+  }
 
   async function addPasskey() {
     setPasskeyBusy(true);
@@ -134,6 +173,32 @@ export default function AccountPage() {
     } finally { setBusy(false); }
   }
 
+  async function uploadAvatar(file: File) {
+    setAvatarBusy(true); setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      await api("/api/account/avatar", { method: "POST", body: form });
+      await reload();
+    } catch (e) {
+      setError((e as ApiError)?.message || "Bild konnte nicht hochgeladen werden");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarBusy(true); setError(null);
+    try {
+      await api("/api/account/avatar", { method: "DELETE" });
+      await reload();
+    } catch (e) {
+      setError((e as ApiError)?.message || "Bild konnte nicht entfernt werden");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
   if (loading) {
     return <AppShell user={status}><Skeleton className="h-64 w-full rounded-xl2" /></AppShell>;
   }
@@ -148,6 +213,34 @@ export default function AccountPage() {
 
         {error && <Banner tone="danger" onClose={() => setError(null)}>{error}</Banner>}
         {notice && <Banner tone="ok" onClose={() => setNotice(null)}>{notice}</Banner>}
+
+        {/* Profilbild */}
+        <section className="rounded-xl2 border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Profilbild</h2>
+          <div className="mt-3 flex items-center gap-4">
+            <Avatar name={status?.full_name || "?"} src={status?.avatar_url} size={64} />
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void uploadAvatar(file);
+                }}
+              />
+              <Button size="sm" loading={avatarBusy} onClick={() => avatarInputRef.current?.click()}>
+                Bild hochladen
+              </Button>
+              {status?.avatar_url && (
+                <Button size="sm" variant="danger" loading={avatarBusy} onClick={removeAvatar}>
+                  Entfernen
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-muted">PNG, JPEG, WebP oder GIF, max. 2 MB.</p>
+        </section>
 
         {/* Passwort */}
         <section className="rounded-xl2 border border-line bg-surface p-4">
@@ -319,6 +412,37 @@ export default function AccountPage() {
           )}
         </section>
 
+        {/* Urlaub / Abwesenheit */}
+        <section className="rounded-xl2 border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">Urlaub</h2>
+          <p className="mt-1 text-sm text-muted">
+            Für diesen Zeitraum gilt dein fester Arbeitsplatz (falls vorhanden) als frei buchbar.
+          </p>
+
+          {absences.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {absences.map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised px-3 py-2">
+                  <span className="text-sm">{formatLong(a.date_from)} – {formatLong(a.date_to)}</span>
+                  <Button size="sm" variant="danger" loading={absenceBusy} onClick={() => removeAbsence(a.id)}>
+                    Entfernen
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <DateRangePicker
+              from={absenceRange.from} to={absenceRange.to}
+              onChange={(from, to) => setAbsenceRange({ from, to })}
+            />
+            <Button variant="primary" loading={absenceBusy} onClick={addAbsence}>
+              Eintragen
+            </Button>
+          </div>
+        </section>
+
         {/* Namens-Stil */}
         <section className="rounded-xl2 border border-line bg-surface p-4">
           <h2 className="text-sm font-semibold">Anzeige-Stil</h2>
@@ -343,12 +467,21 @@ export default function AccountPage() {
             >
               Glitzer
             </button>
+            <button
+              onClick={() => saveNameStyle("particles", nameStyleColor)}
+              className={[
+                "rounded-lg border px-3 py-1.5 text-sm transition-colors focus-ring",
+                nameStyle === "particles" ? "border-accent/50 text-ink" : "border-line text-muted hover:bg-raised",
+              ].join(" ")}
+            >
+              Glühen
+            </button>
           </div>
 
-          {nameStyle === "glitter" && (
+          {(nameStyle === "glitter" || nameStyle === "particles") && (
             <div className="mt-3 max-w-[200px] animate-fade-in">
               <ColorPicker label="Farbe" value={nameStyleColor}
-                           onChange={(c) => saveNameStyle("glitter", c)} />
+                           onChange={(c) => saveNameStyle(nameStyle, c)} />
             </div>
           )}
 

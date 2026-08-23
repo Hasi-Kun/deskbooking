@@ -126,7 +126,7 @@ export default function LoginPage() {
                 </label>
                 <input id="email" type="email" required autoComplete="username" autoFocus value={email}
                        onChange={(e) => setEmail(e.target.value)}
-                       placeholder="email@domain.cc"
+                       placeholder="vorname.nachname@firma.de"
                        className="w-full rounded-lg bg-raised px-3 py-2.5 text-sm
                                   transition-colors placeholder:text-muted/60 focus-ring" />
               </div>

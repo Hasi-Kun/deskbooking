@@ -15,7 +15,11 @@
   --c-muted: 113 113 122;
   --c-line: 228 228 231;
   --c-free: 22 163 74;
-  --c-occupied: 161 161 170;
+  /* "Belegt" war vorher neutrales Grau (kaum von "Frei"/Inaktiv zu
+     unterscheiden) - jetzt ein warmes Sonnenuntergangs-Orange, damit der
+     Zustand auf einen Blick auffällt statt sich ins Hintergrundrauschen
+     einzureihen. */
+  --c-occupied: 234 88 12;
   --c-danger: 220 38 38;
 
   --accent: #a3e635;
@@ -38,7 +42,7 @@
   --c-muted: 138 138 145;
   --c-line: 38 38 40;
   --c-free: 132 204 22;
-  --c-occupied: 82 82 88;
+  --c-occupied: 251 146 60;
   --c-danger: 248 113 113;
 
   --accent-ink: #0a0a0a;
@@ -179,3 +183,62 @@ main {
   color: var(--glitter-base, #35e0c0);
   font-weight: 600;
 }
+
+/* ---------- Nutzername-Stil: Particles (pulsierendes Glühen) ---------- */
+@keyframes styled-name-sparkle {
+  0%, 100% {
+    text-shadow: 0 0 2px currentColor, 0 0 0px currentColor;
+  }
+  50% {
+    text-shadow: 0 0 8px currentColor, 0 0 2px currentColor;
+  }
+}
+.styled-name-particles {
+  animation: styled-name-sparkle 2.2s ease-in-out infinite;
+}
+
+/* ---------- Slider (Layout-Editor: Breite/Höhe/Drehung) ----------
+   Ersetzt den nackten Browser-Standard-Regler durch einen gefüllten Track
+   (die Strecke bis zum aktuellen Wert ist eingefärbt, wie bei den reui-
+   Reglern) plus einen groesseren, deutlicher greifbaren Thumb. Das
+   Füll-Prozent kommt als CSS-Variable --range-pct vom Element selbst (inline
+   style), da reines CSS den Wert eines <input type="range"> nicht kennt. */
+.custom-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%, var(--accent) var(--range-pct, 0%),
+    rgb(var(--c-line)) var(--range-pct, 0%), rgb(var(--c-line)) 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+.custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid rgb(var(--c-surface));
+  box-shadow: 0 0 0 1px rgb(var(--c-line));
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.custom-range::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.custom-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid rgb(var(--c-surface));
+  box-shadow: 0 0 0 1px rgb(var(--c-line));
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.custom-range::-moz-range-thumb:hover { transform: scale(1.15); }
+.custom-range::-moz-range-track { background: transparent; }

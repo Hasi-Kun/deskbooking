@@ -1,7 +1,7 @@
 import uuid
 import enum
-from datetime import datetime, date
-from sqlalchemy import String, Boolean, ForeignKey, Date, DateTime, Enum, Integer, Float, UniqueConstraint, func
+from datetime import datetime, date, time, timedelta
+from sqlalchemy import String, Boolean, ForeignKey, Date, DateTime, Time, Enum, Integer, Float, LargeBinary, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from .database import Base
@@ -60,12 +60,54 @@ class User(Base):
     name_style: Mapped[str] = mapped_column(String(20), default="plain")   # plain | glitter
     name_style_color: Mapped[str] = mapped_column(String(7), default="#35E0C0")
 
+    # --- Profilbild ---
+    # Bewusst als Bytes in der DB statt als Datei im Dateisystem: der
+    # Frontend-Container ist zustandslos/austauschbar (kein eigenes Volume),
+    # ein Bild im Dateisystem waere bei einem Neustart/Rebuild weg. Ueber die
+    # DB ueberlebt es das wie jede andere Nutzer-Einstellung auch.
+    avatar_mime: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def avatar_url(self) -> str | None:
+        """Wird u.a. von UserOut/UserStatusOut ueber from_attributes gelesen -
+        deshalb hier als Property statt als eigene Spalte."""
+        if not self.avatar_data:
+            return None
+        ts = int(self.avatar_updated_at.timestamp()) if self.avatar_updated_at else 0
+        return f"/api/users/{self.id}/avatar?v={ts}"
+
+    # --- Erwähnungen im Chat (@Name) ---
+    # Wann wurden zuletzt "meine" Erwähnungen gesehen? Bestimmt das
+    # Benachrichtigungs-Badge - nur eigene Erwähnungen, nicht der ganze Kanal.
+    last_mention_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # --- Online-Status (Chat) ---
+    # Wird per Heartbeat (siehe /api/auth/heartbeat) alle ~25s aktualisiert,
+    # solange der Tab offen/aktiv ist. "Online" ist rein zeitbasiert
+    # abgeleitet (kein separater Socket/Presence-Server noetig).
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def online(self) -> bool:
+        if not self.last_seen_at:
+            return False
+        ref = self.last_seen_at
+        now = datetime.now(ref.tzinfo) if ref.tzinfo else datetime.utcnow()
+        return (now - ref) < timedelta(seconds=90)
+
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    bookings: Mapped[list["Booking"]] = relationship(back_populates="user")
+    # passive_deletes=True: ohne das versucht SQLAlchemy beim Loeschen eines
+    # Users, in bookings.user_id vorher NULL einzutragen (Standard-ORM-
+    # Verhalten fuer eine unassoziierte Relationship) - das schlaegt fehl,
+    # weil die Spalte NOT NULL ist. Mit passive_deletes ueberlaesst SQLAlchemy
+    # das Aufraeumen komplett dem bereits vorhandenen ON DELETE CASCADE der DB.
+    bookings: Mapped[list["Booking"]] = relationship(back_populates="user", passive_deletes=True)
 
 
 class Floor(Base):
@@ -100,6 +142,11 @@ class Desk(Base):
     # Fest zugewiesener Platz (z.B. Teamleitung, Spezial-Hardware) - dauerhaft
     # belegt, taucht nicht im taeglichen Buchungspool auf und ist fuer andere nicht buchbar.
     fixed_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # An welchen Wochentagen die feste Zuweisung gilt (z.B. Buero Mo/Di/Do,
+    # Homeoffice Mi/Fr) - an allen anderen Tagen ist der Platz frei buchbar.
+    # Montag=0 ... Sonntag=6 (Python date.weekday()), als CSV gespeichert.
+    # Default = alle Werktage, entspricht dem alten "immer fest"-Verhalten.
+    fixed_days: Mapped[str] = mapped_column(String(20), default="0,1,2,3,4")
 
     floor: Mapped["Floor"] = relationship(back_populates="desks")
     fixed_user: Mapped["User | None"] = relationship(foreign_keys=[fixed_user_id])
@@ -134,12 +181,12 @@ class SceneObject(Base):
 
 class Booking(Base):
     __tablename__ = "bookings"
-    # Ein Platz kann pro Tag zwei Halbtags-Buchungen haben, aber jedes
-    # Zeitfenster nur einmal. Dass "full" mit den Halbtagen kollidiert, laesst
-    # sich als Constraint nicht ausdruecken - das prueft der Router.
-    __table_args__ = (
-        UniqueConstraint("desk_id", "booking_date", "slot", name="uq_desk_date_slot"),
-    )
+    # HINWEIS: Es gab hier frueher eine UniqueConstraint auf
+    # (desk_id, booking_date, slot). Seit Konferenztische mit Uhrzeiten statt
+    # Halbtags-Slots gebucht werden, koennen mehrere Buchungen denselben
+    # Slot-Wert ("full", da bei Zeitbuchungen ungenutzt) teilen - die
+    # Ueberschneidungspruefung passiert komplett im Router (Zeitueberlappung
+    # bzw. Slot-Kollision), eine DB-Constraint kann das nicht mehr abbilden.
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     desk_id: Mapped[str] = mapped_column(ForeignKey("desks.id", ondelete="CASCADE"))
@@ -147,6 +194,10 @@ class Booking(Base):
     booking_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.confirmed)
     slot: Mapped[BookingSlot] = mapped_column(Enum(BookingSlot), default=BookingSlot.full, nullable=False)
+    # Nur bei Konferenztischen (Desk.capacity > 1) gesetzt: Uhrzeit-Fenster
+    # statt ganztags/halbtags. Bei normalen Plaetzen bleiben beide NULL.
+    start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    end_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     comment: Mapped[str] = mapped_column(String(280), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -205,6 +256,10 @@ class Message(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     body: Mapped[str] = mapped_column(String(2000), nullable=False)
+    # Erwähnte Nutzer-IDs, als ",id1,id2," gespeichert (führende/folgende
+    # Kommas!) - so ist ein Substring-Check (",<id>," in mentions) sicher
+    # gegen Teiltreffer zwischen UUIDs, ohne eine eigene Tabelle zu brauchen.
+    mentions: Mapped[str] = mapped_column(String(2000), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -272,6 +327,21 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(String(64), default="")
     ip_address: Mapped[str] = mapped_column(String(64), default="")
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Absence(Base):
+    """Urlaub/Abwesenheit einer Person. Wird bei festen Arbeitsplätzen
+    berücksichtigt: ist der fest zugewiesene Nutzer an einem Tag abwesend,
+    gilt der Platz für diesen Tag als frei buchbar statt blockiert."""
+    __tablename__ = "absences"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
 
 
 class AppSetting(Base):

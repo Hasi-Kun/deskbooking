@@ -36,7 +36,11 @@ function hadActiveSession(): boolean {
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
   const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
+  // FormData (z.B. Avatar-Upload) setzt den Content-Type samt Boundary
+  // selbst - ein manuell gesetzter "application/json"-Header würde den
+  // Request sonst kaputt machen (Backend kann die Teile nicht mehr trennen).
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (!isFormData) headers.set("Content-Type", "application/json");
 
   // CSRF-Token (double-submit) fuer zustandsaendernde Requests mitsenden
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -50,7 +54,21 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     let message = "Unbekannter Fehler";
     try {
       const body = await res.json();
-      message = body.detail || message;
+      // FastAPI liefert bei 422 (Validierungsfehlern) KEINEN String in
+      // "detail", sondern eine Liste von {type,loc,msg,input}-Objekten. Als
+      // React-Kind gerendert crasht das mit "Objects are not valid as a
+      // React child" (Error #31) - deshalb hier defensiv zu lesbarem Text
+      // zusammenfassen, statt das Array/Objekt unverändert durchzureichen.
+      if (Array.isArray(body?.detail)) {
+        message = body.detail
+          .map((d: any) => (typeof d === "string" ? d : d?.msg))
+          .filter(Boolean)
+          .join("; ") || message;
+      } else if (typeof body?.detail === "string") {
+        message = body.detail;
+      } else if (body?.detail && typeof body.detail === "object") {
+        message = body.detail.msg || message;
+      }
     } catch {}
 
     if (res.status === 401 && !AUTH_FLOW_PATHS.some((p) => path.startsWith(p)) && hadActiveSession()) {
@@ -81,7 +99,7 @@ export type PublicConfig = {
 
 export type User = {
   id: string; email: string; full_name: string; role: string;
-  name_style?: string; name_style_color?: string;
+  name_style?: string; name_style_color?: string; avatar_url?: string | null;
 };
 
 export type Floor = {
@@ -95,6 +113,9 @@ export type Desk = {
   fixed_user_style?: string; fixed_user_style_color?: string;
   /** 1 = normaler Einzelplatz. >1 = Konferenztisch mit Gruppenbuchung. */
   capacity: number;
+  /** Wochentage (Montag=0...Sonntag=6), an denen "fixed_user_id" gilt - z.B.
+   *  Büro Mo/Di/Do, Homeoffice Mi/Fr. An anderen Tagen ist der Platz frei. */
+  fixed_days: number[];
 };
 
 export type BookingSlot = "full" | "morning" | "afternoon";
@@ -106,7 +127,9 @@ export type Attendee = {
 export type Booking = {
   id: string; desk_id: string; desk_name: string; user_id: string; user_name: string;
   user_name_style?: string; user_name_style_color?: string;
-  booking_date: string; status: string; slot: BookingSlot; comment: string;
+  booking_date: string; status: string; slot: BookingSlot;
+  start_time?: string | null; end_time?: string | null;
+  comment: string;
   attendees: Attendee[]; created_at: string;
 };
 
@@ -123,6 +146,7 @@ export type SceneObject = {
 export type AdminUser = {
   id: string; email: string; full_name: string; role: string;
   is_active: boolean; totp_enabled: boolean; backup_codes_remaining?: number;
+  avatar_url?: string | null;
 };
 
 
@@ -134,12 +158,43 @@ export type Passkey = {
 
 export type ChatMessage = {
   id: string; channel: "global" | "dm"; sender_id: string; sender_name: string;
-  sender_name_style?: string; sender_name_style_color?: string;
-  recipient_id: string | null; body: string; created_at: string;
+  sender_name_style?: string; sender_name_style_color?: string; sender_avatar_url?: string | null;
+  sender_online?: boolean;
+  recipient_id: string | null; body: string; mentioned_user_ids?: string[]; created_at: string;
 };
 
 export type Conversation = {
   user_id: string; user_name: string;
-  user_name_style?: string; user_name_style_color?: string;
+  user_name_style?: string; user_name_style_color?: string; user_avatar_url?: string | null;
+  user_online?: boolean;
   last_message: string; last_at: string; unread: number;
 };
+
+export type DirectoryUser = {
+  id: string; full_name: string;
+  name_style?: string; name_style_color?: string; avatar_url?: string | null; online?: boolean;
+};
+
+export type Absence = {
+  id: string; user_id: string; user_name: string; date_from: string; date_to: string;
+};
+
+/** Sortiert "D-2" vor "D-10" (nicht alphabetisch, wo "D-10" vor "D-2" käme).
+ *  Zerlegt in Ziffern-/Nichtziffern-Blöcke und vergleicht Ziffernblöcke
+ *  numerisch - so landen Tische/Konferenztische in der Reihenfolge ihrer
+ *  laufenden Nummer statt in Textsortierung. */
+export function naturalCompare(a: string, b: string): number {
+  const pa = a.match(/(\d+)|(\D+)/g) ?? [];
+  const pb = b.match(/(\d+)|(\D+)/g) ?? [];
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const x = pa[i] ?? "";
+    const y = pb[i] ?? "";
+    if (x === y) continue;
+    const nx = Number(x);
+    const ny = Number(y);
+    if (!Number.isNaN(nx) && !Number.isNaN(ny) && x !== "" && y !== "") return nx - ny;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
