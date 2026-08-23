@@ -7,18 +7,23 @@ import { isWebAuthnSupported, getPasskeyAssertion } from "@/lib/webauthn";
 import { useBrand } from "../components/BrandProvider";
 import Button from "../components/ui/Button";
 
-type Step = "email" | "choose" | "password" | "totp";
+type Step = "credentials" | "second-factor";
+/** "checking": wird kurz angezeigt, während geprüft wird, ob ein Passkey
+ *  hinterlegt ist. "passkey": Browser-Abfrage läuft/lief automatisch.
+ *  "totp": Code-Eingabe (Standard, falls kein Passkey vorhanden ist, oder
+ *  Ausweichoption, falls der Passkey gerade nicht greifbar ist). */
+type SecondFactorMode = "checking" | "passkey" | "totp";
 
 export default function LoginPage() {
   const router = useRouter();
   const { support_contact } = useBrand();
-  const [step, setStep] = useState<Step>("email");
+  const [step, setStep] = useState<Step>("credentials");
+  const [sfMode, setSfMode] = useState<SecondFactorMode>("checking");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [checkingPasskey, setCheckingPasskey] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [hasPasskey, setHasPasskey] = useState(false);
   const passkeySupported = isWebAuthnSupported();
@@ -26,37 +31,70 @@ export default function LoginPage() {
   const totpRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (step === "password") passwordRef.current?.focus();
-    if (step === "totp") totpRef.current?.focus();
+    if (step === "credentials") passwordRef.current?.focus();
   }, [step]);
 
-  async function onEmailSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    if (sfMode === "totp") totpRef.current?.focus();
+  }, [sfMode]);
+
+  async function onCredentialsSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email) return;
     setError(null);
-    setCheckingPasskey(true);
-    // Hinweis: Diese Abfrage verrät serverseitig zwangsläufig, ob zu dieser
-    // E-Mail Passkeys hinterlegt sind (leere vs. nicht-leere allowCredentials-
-    // Liste) - das war ursprünglich bewusst vermieden, um die Anmeldeseite
-    // nicht zur Auskunftsquelle für Konto-/2FA-Status zu machen. Da die
-    // Passkey-Option nun nur bei vorhandenem Schlüssel erscheinen soll, lässt
-    // sich das nicht mehr vollständig vermeiden.
-    let available = false;
+    setLoading(true);
     try {
-      const { options } = await api<{ token: string; options: any }>(
-        "/api/auth/webauthn/login/options", { method: "POST", body: JSON.stringify({ email }) }
-      );
-      available = passkeySupported && Array.isArray(options?.allowCredentials) && options.allowCredentials.length > 0;
-    } catch {
-      available = false;
+      // Immer E-Mail UND Passwort gemeinsam - eine reine Passkey-Anmeldung
+      // ohne Passwort gibt es bewusst nicht mehr: der Passkey-Status einer
+      // Adresse wird dadurch erst NACH einer korrekten Passwortprüfung
+      // abgefragt und verrät vorher nichts über die Existenz des Kontos.
+      await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      markSessionActive();
+      resetSessionExpired();
+      router.replace("/dashboard");
+    } catch (err) {
+      const apiErr = err as ApiError;
+      if (apiErr.status === 401 && apiErr.message?.includes("Authenticator")) {
+        // Passwort war korrekt, zweiter Faktor fehlt noch.
+        setStep("second-factor");
+        setSfMode("checking");
+        setError(null);
+      } else {
+        setError(apiErr.message || "Anmeldung fehlgeschlagen");
+      }
+    } finally {
+      setLoading(false);
     }
-    setHasPasskey(available);
-    setCheckingPasskey(false);
-    // Kein Passkey hinterlegt (oder vom Browser nicht unterstützt): die
-    // Auswahl-Zwischenseite hätte hier ohnehin nur einen einzigen Button -
-    // direkt zur Passworteingabe springen.
-    setStep(available ? "choose" : "password");
   }
+
+  // Sobald Schritt 2 erreicht ist: prüfen, ob ein Passkey hinterlegt ist,
+  // und wenn ja sofort automatisch die Browser-Abfrage starten - ohne
+  // weiteren Klick. Erst an dieser Stelle ist die Abfrage unbedenklich,
+  // weil das Passwort schon bestätigt wurde.
+  useEffect(() => {
+    if (step !== "second-factor" || sfMode !== "checking") return;
+    let cancelled = false;
+    (async () => {
+      let available = false;
+      try {
+        const { options } = await api<{ token: string; options: any }>(
+          "/api/auth/webauthn/login/options", { method: "POST", body: JSON.stringify({ email }) }
+        );
+        available = passkeySupported && Array.isArray(options?.allowCredentials) && options.allowCredentials.length > 0;
+      } catch {
+        available = false;
+      }
+      if (cancelled) return;
+      setHasPasskey(available);
+      if (available) {
+        setSfMode("passkey");
+        void loginWithPasskey();
+      } else {
+        setSfMode("totp");
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, sfMode]);
 
   async function loginWithPasskey() {
     setPasskeyBusy(true);
@@ -73,36 +111,40 @@ export default function LoginPage() {
       resetSessionExpired();
       router.replace("/dashboard");
     } catch (err: any) {
-      if (err?.name === "NotAllowedError") { setPasskeyBusy(false); return; }
-      setError(err?.message || "Anmeldung mit Sicherheitsschlüssel fehlgeschlagen");
+      // Abgebrochen/Timeout: kein Fehlertext, einfach zum erneuten Versuch
+      // oder zur Code-Eingabe stehen lassen statt eine rote Meldung zu zeigen.
+      if (err?.name !== "NotAllowedError") {
+        setError(err?.message || "Passkey-Anmeldung fehlgeschlagen");
+      }
     } finally {
       setPasskeyBusy(false);
     }
   }
 
-  async function onPasswordSubmit(e: React.FormEvent) {
+  async function onTotpSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
       await api("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password, totp_code: step === "totp" ? totp : undefined }),
+        method: "POST", body: JSON.stringify({ email, password, totp_code: totp }),
       });
       markSessionActive();
       resetSessionExpired();
       router.replace("/dashboard");
     } catch (err) {
-      const apiErr = err as ApiError;
-      if (step !== "totp" && apiErr.message?.includes("Authenticator")) {
-        setStep("totp");
-        setError(null);
-      } else {
-        setError(apiErr.message || "Anmeldung fehlgeschlagen");
-      }
+      setError((err as ApiError).message || "Bestätigung fehlgeschlagen");
     } finally {
       setLoading(false);
     }
+  }
+
+  function backToCredentials() {
+    setStep("credentials");
+    setSfMode("checking");
+    setPassword("");
+    setTotp("");
+    setError(null);
   }
 
   return (
@@ -117,9 +159,9 @@ export default function LoginPage() {
                 className="orb -top-20 left-1/2 h-44 w-44 -translate-x-1/2 opacity-[0.13]"
                 style={{ background: "var(--ambient)" }} />
 
-          {/* Schritt 1: nur die E-Mail-Adresse */}
-          {step === "email" && (
-            <form onSubmit={onEmailSubmit} className="relative space-y-3.5 animate-fade-in">
+          {/* Schritt 1: E-Mail + Passwort zusammen */}
+          {step === "credentials" && (
+            <form onSubmit={onCredentialsSubmit} className="relative space-y-3.5 animate-fade-in">
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-xs font-medium text-muted">
                   E-Mail-Adresse
@@ -130,41 +172,6 @@ export default function LoginPage() {
                        className="w-full rounded-lg bg-raised px-3 py-2.5 text-sm
                                   transition-colors placeholder:text-muted/60 focus-ring" />
               </div>
-              <Button type="submit" variant="primary" loading={checkingPasskey} className="w-full">Weiter</Button>
-            </form>
-          )}
-
-          {/* Schritt 2: Methode wählen - für jede E-Mail identisch dargestellt */}
-          {step === "choose" && (
-            <div className="relative space-y-3.5 animate-fade-in">
-              <EmailBadge email={email} onChange={() => { setStep("email"); setError(null); }} />
-
-              <Button
-                type="button" variant="primary" loading={passkeyBusy}
-                onClick={loginWithPasskey} className="w-full"
-              >
-                <PasskeyIcon /> Mit Passkey anmelden
-              </Button>
-
-              <div className="relative flex items-center gap-3 py-0.5">
-                <span className="h-px flex-1 bg-line" />
-                <span className="text-[11px] uppercase tracking-wide text-muted">oder</span>
-                <span className="h-px flex-1 bg-line" />
-              </div>
-
-              <Button
-                type="button" variant="secondary" className="w-full"
-                onClick={() => { setStep("password"); setError(null); }}
-              >
-                Mit Passwort anmelden
-              </Button>
-            </div>
-          )}
-
-          {/* Schritt 3: Passwort */}
-          {step === "password" && (
-            <form onSubmit={onPasswordSubmit} className="relative space-y-3.5 animate-fade-in">
-              <EmailBadge email={email} onChange={() => { setStep("email"); setError(null); }} />
               <div>
                 <label htmlFor="password" className="mb-1.5 block text-xs font-medium text-muted">
                   Passwort
@@ -178,43 +185,69 @@ export default function LoginPage() {
               <Button type="submit" variant="primary" loading={loading} className="w-full">
                 Anmelden
               </Button>
-              {hasPasskey && (
-                <button type="button"
-                        onClick={() => { setStep("choose"); setPassword(""); setError(null); }}
-                        className="mx-auto block text-xs text-muted underline focus-ring rounded">
-                  Andere Methode wählen
-                </button>
-              )}
             </form>
           )}
 
-          {/* Schritt 4: TOTP (zweiter Faktor, nur falls das Konto es verlangt) */}
-          {step === "totp" && (
-            <form onSubmit={onPasswordSubmit} className="relative space-y-3.5 animate-fade-in">
-              <EmailBadge email={email} onChange={() => { setStep("email"); setError(null); }} />
-              <div>
-                <label htmlFor="totp" className="mb-1.5 block text-xs font-medium text-muted">
-                  6-stelliger Code aus deiner Authenticator-App
-                </label>
-                <input ref={totpRef} id="totp" inputMode="numeric" autoComplete="one-time-code" required
-                       value={totp}
-                       onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                       placeholder="123456"
-                       className="w-full rounded-lg bg-raised px-3 py-2.5 text-center
-                                  text-xl tracking-[0.35em] tabular-nums focus-ring" />
-                <p className="mt-1.5 text-[11px] text-muted">
-                  Kein Zugriff aufs Gerät? Ein Einmal-Code (<span className="tracking-wide tabular-nums">XXXX-XXXX</span>) funktioniert ebenfalls.
-                </p>
-              </div>
-              <Button type="submit" variant="primary" loading={loading} className="w-full">
-                Bestätigen
-              </Button>
-              <button type="button"
-                      onClick={() => { setStep("password"); setTotp(""); setError(null); }}
-                      className="mx-auto block text-xs text-muted underline focus-ring rounded">
-                Zurück
-              </button>
-            </form>
+          {/* Schritt 2: zweiter Faktor - Passkey (automatisch) oder TOTP */}
+          {step === "second-factor" && (
+            <div className="relative space-y-3.5 animate-fade-in">
+              <EmailBadge email={email} onChange={backToCredentials} />
+
+              {sfMode === "checking" && (
+                <div className="flex items-center justify-center gap-2.5 py-6 text-sm text-muted">
+                  <Spinner /> Wird geprüft…
+                </div>
+              )}
+
+              {sfMode === "passkey" && (
+                <div className="space-y-3.5">
+                  <div className="flex flex-col items-center gap-2.5 rounded-lg bg-raised px-4 py-6 text-center">
+                    <PasskeyIcon busy={passkeyBusy} />
+                    <p className="text-sm text-ink">
+                      {passkeyBusy ? "Bestätige im Browser-Fenster…" : "Passkey-Bestätigung"}
+                    </p>
+                  </div>
+                  <Button type="button" variant="secondary" loading={passkeyBusy}
+                          onClick={loginWithPasskey} className="w-full">
+                    Erneut versuchen
+                  </Button>
+                  <button type="button"
+                          onClick={() => { setSfMode("totp"); setError(null); }}
+                          className="mx-auto block text-xs text-muted underline focus-ring rounded">
+                    Stattdessen Code eingeben
+                  </button>
+                </div>
+              )}
+
+              {sfMode === "totp" && (
+                <form onSubmit={onTotpSubmit} className="space-y-3.5">
+                  <div>
+                    <label htmlFor="totp" className="mb-1.5 block text-xs font-medium text-muted">
+                      6-stelliger Code aus deiner Authenticator-App
+                    </label>
+                    <input ref={totpRef} id="totp" inputMode="numeric" autoComplete="one-time-code" required
+                           value={totp}
+                           onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                           placeholder="123456"
+                           className="w-full rounded-lg bg-raised px-3 py-2.5 text-center
+                                      text-xl tracking-[0.35em] tabular-nums focus-ring" />
+                    <p className="mt-1.5 text-[11px] text-muted">
+                      Kein Zugriff aufs Gerät? Ein Einmal-Code (<span className="tracking-wide tabular-nums">XXXX-XXXX</span>) funktioniert ebenfalls.
+                    </p>
+                  </div>
+                  <Button type="submit" variant="primary" loading={loading} className="w-full">
+                    Bestätigen
+                  </Button>
+                  {hasPasskey && (
+                    <button type="button"
+                            onClick={() => { setSfMode("passkey"); setError(null); void loginWithPasskey(); }}
+                            className="mx-auto block text-xs text-muted underline focus-ring rounded">
+                      Stattdessen Passkey verwenden
+                    </button>
+                  )}
+                </form>
+              )}
+            </div>
           )}
 
           {error && (
@@ -247,10 +280,20 @@ function EmailBadge({ email, onChange }: { email: string; onChange: () => void }
   );
 }
 
-function PasskeyIcon() {
+function Spinner() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="animate-spin text-muted" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PasskeyIcon({ busy }: { busy?: boolean }) {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         className={busy ? "animate-pulse text-accent" : "text-muted"}>
       <circle cx="8.5" cy="9" r="4.5" />
       <path d="M13 9h8M17 9v4M20 9v4" />
       <path d="M4.5 16c0-1.5 2-2.5 4-2.5s4 1 4 2.5v2.5h-8z" />
