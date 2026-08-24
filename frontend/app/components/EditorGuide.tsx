@@ -35,6 +35,14 @@ const TIPS: Tip[] = [
     underline: "from-amber-500 to-orange-400",
     duration: "duration-500",
   },
+  {
+    title: "Feinjustieren",
+    body: "Pfeiltasten schieben das ausgewählte Element (Shift = größerer Schritt), Mausrad dreht es.",
+    icon: <NudgeIcon />,
+    glow: "from-rose-500/25 via-pink-400/10 to-transparent",
+    underline: "from-rose-500 to-pink-400",
+    duration: "duration-500",
+  },
 ];
 
 /** Kurzanleitung unterhalb der Zeichenfläche - gleiche Gestaltung wie die
@@ -92,4 +100,7 @@ function PointerIcon() {
 }
 function SaveIcon() {
   return (<svg {...svg}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>);
+}
+function NudgeIcon() {
+  return (<svg {...svg}><path d="M12 19V5M5 12l7-7 7 7" /><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" /></svg>);
 }

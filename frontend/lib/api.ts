@@ -95,6 +95,8 @@ export type PublicConfig = {
   ambient_color: string;
   logo_url: string;
   support_contact: string;
+  max_meeting_hours: number;
+  email_configured: boolean;
 };
 
 export type User = {
@@ -102,6 +104,8 @@ export type User = {
   name_style?: string; name_style_color?: string; avatar_url?: string | null;
   mine_uses_accent?: boolean;
   mine_color?: string;
+  notify_email_dm?: boolean;
+  notify_email_mention?: boolean;
 };
 
 export type Floor = {
@@ -168,13 +172,14 @@ export type ChatMessage = {
 export type Conversation = {
   user_id: string; user_name: string;
   user_name_style?: string; user_name_style_color?: string; user_avatar_url?: string | null;
-  user_online?: boolean;
+  user_online?: boolean; user_last_seen_at?: string | null;
   last_message: string; last_at: string; unread: number;
 };
 
 export type DirectoryUser = {
   id: string; full_name: string;
   name_style?: string; name_style_color?: string; avatar_url?: string | null; online?: boolean;
+  last_seen_at?: string | null;
 };
 
 export type Absence = {
@@ -183,7 +188,7 @@ export type Absence = {
 
 export type AuditLogEntry = {
   id: string; action: string; entity: string; entity_id: string; ip_address: string;
-  timestamp: string; user_id: string | null; user_name: string | null;
+  timestamp: string; user_id: string | null; user_name: string | null; user_avatar_url?: string | null;
 };
 
 /** Sortiert "D-2" vor "D-10" (nicht alphabetisch, wo "D-10" vor "D-2" käme).

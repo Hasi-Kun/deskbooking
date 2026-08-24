@@ -37,6 +37,9 @@ type BuilderProps = {
   onMoveDesk: (id: string, x: number, y: number) => void;
   onMoveObject: (id: string, x: number, y: number) => void;
   onMoveWall: (id: string, x1: number, y1: number, x2: number, y2: number) => void;
+  /** Mausrad über einem ausgewählten Möbel-/Deko-Element dreht es - delta ist
+   *  bereits auf ±15° pro Notch normalisiert (siehe handleWheel). */
+  onRotateObject?: (id: string, delta: number) => void;
   onDropItem: (item: PaletteItem, x: number, y: number) => void;
   onDrawWall: (x1: number, y1: number, x2: number, y2: number) => void;
   onRequestDelete?: () => void;
@@ -303,7 +306,7 @@ export default function FloorCanvas(props: Props) {
                     key={w.id}
                     points={pts}
                     fill="none"
-                    stroke={selected ? "url(#wall-accent)" : "rgb(var(--c-window))"}
+                    stroke={selected ? "url(#wall-accent)" : "rgb(var(--c-ink))"}
                     strokeWidth={selected ? 2.5 : 1.75}
                     strokeLinejoin="round"
                     opacity={selected ? 1 : 0.8}
@@ -414,6 +417,15 @@ export default function FloorCanvas(props: Props) {
                   e.preventDefault();
                   builder.onSelect({ type: "object", id: o.id });
                   builder.onContext({ type: "object", id: o.id }, { x: e.clientX, y: e.clientY });
+                }}
+                onWheel={(e) => {
+                  if (!builder || !selected || !builder.onRotateObject) return;
+                  // Nur drehen, wenn das Element bereits ausgewählt ist - sonst
+                  // würde jedes zufällige Überscrollen beim Verschieben der
+                  // Ansicht ungewollt Elemente verdrehen.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  builder.onRotateObject(o.id, e.deltaY > 0 ? 15 : -15);
                 }}
                 title={o.label || undefined}
               >

@@ -17,7 +17,7 @@ const DEFAULT_PRESETS = [
 ];
 
 const PANEL_W = 236;
-const PANEL_H = 320;
+const PANEL_H = 360;
 
 /**
  * Farbfeld mit Auswahl-Popover (@uiw/react-color-sketch).
@@ -98,10 +98,30 @@ export default function ColorPicker({ label, hint, value, onChange, presets = DE
           <Sketch
             color={value}
             disableAlpha
-            presetColors={presets}
+            presetColors={[]}
             onChange={(c) => onChange(c.hex.toUpperCase())}
             style={{ boxShadow: "none", background: "transparent", width: PANEL_W - 16 }}
           />
+          {/* Eigene Farbfelder statt der eingebauten Presets der Sketch-
+              Bibliothek - deren Klick-Handler griff bei den vorgeschlagenen
+              Farben nicht zuverlässig (interner CSS-Var-Bug der Bibliothek). */}
+          <div className="mt-1 flex flex-wrap gap-1.5 px-1 pb-1">
+            {presets.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                title={hex}
+                onClick={() => onChange(hex.toUpperCase())}
+                aria-label={`Farbe ${hex} wählen`}
+                aria-pressed={value.toUpperCase() === hex.toUpperCase()}
+                className={[
+                  "h-5 w-5 shrink-0 rounded-full border transition-transform duration-150 hover:scale-110 focus-ring",
+                  value.toUpperCase() === hex.toUpperCase() ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : "border-black/15",
+                ].join(" ")}
+                style={{ background: hex }}
+              />
+            ))}
+          </div>
         </div>,
         document.body
       )}

@@ -17,11 +17,15 @@ async def list_floors(user: User = Depends(get_current_user), db: AsyncSession =
 
 
 @router.post("", response_model=FloorOut, dependencies=[Depends(verify_csrf)])
-async def create_floor(payload: FloorCreate, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+async def create_floor(payload: FloorCreate, request: Request,
+                        admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     floor = Floor(**payload.model_dump())
     db.add(floor)
     await db.commit()
     await db.refresh(floor)
+    db.add(AuditLog(user_id=admin.id, action=f"floor_created:{floor.name}", entity="floor",
+                     entity_id=floor.id, ip_address=request.client.host if request.client else ""))
+    await db.commit()
     return floor
 
 

@@ -21,7 +21,6 @@ module.exports = {
         free: "rgb(var(--c-free) / <alpha-value>)",
         occupied: "rgb(var(--c-occupied) / <alpha-value>)",
         danger: "rgb(var(--c-danger) / <alpha-value>)",
-        window: "rgb(var(--c-window) / <alpha-value>)",
         // "mine" ist zur Laufzeit umschaltbar (Konto-Einstellung "Deine
         // Buchung an Akzentfarbe binden") - AppShell setzt --mine-active
         // entsprechend, mit Fallback auf die feste Standardfarbe.

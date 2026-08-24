@@ -5,10 +5,11 @@ import { api, ApiError, Absence, Booking, BookingSlot, Desk, Floor, SceneObject,
 import AppShell from "../components/AppShell";
 import { useAppData } from "../components/AppDataProvider";
 import FloorCanvas from "../components/FloorCanvas";
-import BookingPopover from "../components/BookingPopover";
+import BookingPopover, { SLOT_LABEL } from "../components/BookingPopover";
 import DayStrip, { DayLoad } from "../components/DayStrip";
 import FeatureCards from "../components/FeatureCards";
 import Button from "../components/ui/Button";
+import AlertDialog from "../components/ui/AlertDialog";
 import { FloorSkeleton } from "../components/ui/Skeleton";
 import PeriodNavigator, { RangeMode } from "../components/ui/PeriodNavigator";
 import { toISO, fromISO, formatLong } from "../components/ui/DatePicker";
@@ -145,7 +146,7 @@ export default function Dashboard() {
     comment: string;
     slot: BookingSlot;
     attendeeIds: string[];
-    range?: { from: string; to: string; skipWeekends: boolean };
+    range?: { from: string; to: string; skipWeekends: boolean; weekdays?: number[] };
     startTime?: string;
     endTime?: string;
   }) {
@@ -156,6 +157,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           desk_id: popover.desk.id, date_from: range.from, date_to: range.to,
           slot, comment, attendee_ids: attendeeIds, skip_weekends: range.skipWeekends,
+          weekdays: range.weekdays,
         }),
       });
       if (res.created.length === 0) {
@@ -179,6 +181,22 @@ export default function Dashboard() {
   async function handleCancel(booking: Booking) {
     await api(`/api/bookings/${booking.id}`, { method: "DELETE" });
     await reload();
+  }
+
+  const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  function jumpToDay(date: string) {
+    setRangeMode("day");
+    setAnchor(date);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function relativeDayLabel(iso: string) {
+    const today = toISO(new Date());
+    if (iso === today) return "Heute";
+    if (iso === addDays(today, 1)) return "Morgen";
+    return formatLong(iso);
   }
 
   // Auslastung je Tag fuer die Ampel-Leiste
@@ -248,6 +266,20 @@ export default function Dashboard() {
   const freeCount = activeDesks.filter(
     (d) => (!d.fixed_user_id || absentFixedDeskIds.has(d.id)) && !isFullyBooked(d)
   ).length;
+
+  const [showAllMine, setShowAllMine] = useState(false);
+  const mineByDate = useMemo(() => {
+    const groups = new Map<string, Booking[]>();
+    [...mine]
+      .sort((a, b) => a.booking_date.localeCompare(b.booking_date) || (a.start_time ?? "").localeCompare(b.start_time ?? ""))
+      .forEach((b) => {
+        const list = groups.get(b.booking_date) ?? [];
+        list.push(b);
+        groups.set(b.booking_date, list);
+      });
+    return Array.from(groups.entries());
+  }, [mine]);
+  const visibleMineGroups = showAllMine ? mineByDate : mineByDate.slice(0, 4);
 
   if (loading) {
     return (
@@ -341,27 +373,96 @@ export default function Dashboard() {
           </p>
         )}
 
-        {/* Eigene kommende Buchungen */}
+        {/* Eigene kommende Buchungen - nach Tag gruppiert, damit sich viele
+            Termine nicht zu einer unübersichtlichen Liste aufstauen. */}
         {mine.length > 0 && (
-          <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-              Deine kommenden Buchungen
-            </h2>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {mine.slice(0, 6).map((b) => (
-                <div key={b.id}
-                     className="group/booking rounded-lg border border-line bg-surface p-3 transition-all
-                                duration-200 hover:border-accent/40 hover:shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium tabular-nums">{b.desk_name}</span>
-                    <span className="text-xs text-muted">{formatLong(b.booking_date)}</span>
-                  </div>
-                  {b.comment && <p className="mt-1 truncate text-xs text-muted">{b.comment}</p>}
+          <section className="rounded-2xl border border-line bg-surface p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Deine kommenden Buchungen</h2>
+              <span className="text-xs text-muted">{mine.length}</span>
+            </div>
+            <div className="space-y-4">
+              {visibleMineGroups.map(([day, bookings]) => (
+                <div key={day}>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {relativeDayLabel(day)}
+                  </p>
+                  <ul className="divide-y divide-line rounded-lg border border-line">
+                    {bookings.map((b) => {
+                      const isMeeting = !!b.start_time && !!b.end_time;
+                      return (
+                        <li key={b.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2.5">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <span
+                              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-mine-ink"
+                              style={{ background: "var(--mine-active, rgb(var(--c-mine)))" }}
+                              aria-hidden="true"
+                            >
+                              {isMeeting ? <MeetingGlyph /> : <DeskGlyphSmall />}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium tabular-nums">{b.desk_name}</span>
+                                <span className="text-xs text-muted">
+                                  {isMeeting ? `${b.start_time}–${b.end_time} Uhr` : SLOT_LABEL[b.slot]}
+                                </span>
+                                {b.attendees.length > 0 && (
+                                  <span className="rounded-full bg-raised px-1.5 py-px text-[10px] text-muted">
+                                    +{b.attendees.length}
+                                  </span>
+                                )}
+                              </div>
+                              {b.comment && <p className="mt-0.5 truncate text-xs text-muted">{b.comment}</p>}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <Button size="sm" variant="secondary" onClick={() => jumpToDay(b.booking_date)}>
+                              Ansehen
+                            </Button>
+                            <Button size="sm" variant="danger" onClick={() => setCancelTarget(b)}>
+                              Stornieren
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
               ))}
             </div>
+            {mineByDate.length > 4 && (
+              <button
+                onClick={() => setShowAllMine((v) => !v)}
+                className="mt-3 text-xs text-muted underline decoration-dotted underline-offset-2 hover:text-ink focus-ring rounded"
+              >
+                {showAllMine ? "Weniger anzeigen" : `Alle ${mineByDate.length} Tage anzeigen`}
+              </button>
+            )}
           </section>
         )}
+
+        <AlertDialog
+          open={!!cancelTarget}
+          title={`Buchung „${cancelTarget?.desk_name ?? ""}“ stornieren?`}
+          description={cancelTarget ? `${relativeDayLabel(cancelTarget.booking_date)} · ${
+            cancelTarget.start_time && cancelTarget.end_time
+              ? `${cancelTarget.start_time}–${cancelTarget.end_time} Uhr` : SLOT_LABEL[cancelTarget.slot]
+          }` : undefined}
+          actionLabel="Stornieren"
+          actionBusy={cancelling}
+          onAction={async () => {
+            if (!cancelTarget) return;
+            setCancelling(true);
+            try {
+              await handleCancel(cancelTarget);
+              setCancelTarget(null);
+            } finally {
+              setCancelling(false);
+            }
+          }}
+          cancelLabel="Abbrechen"
+          onCancel={() => setCancelTarget(null)}
+        />
 
         <FeatureCards />
       </div>
@@ -379,5 +480,25 @@ export default function Dashboard() {
       />
       {user && <ChatDock currentUser={user} />}
     </AppShell>
+  );
+}
+
+function MeetingGlyph() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" />
+    </svg>
+  );
+}
+function DeskGlyphSmall() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="8" width="18" height="4" rx="1" />
+      <path d="M5 12v6M19 12v6" />
+      <rect x="9" y="3" width="6" height="5" rx="1" />
+    </svg>
   );
 }

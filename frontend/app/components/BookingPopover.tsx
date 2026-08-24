@@ -10,6 +10,8 @@ import Checkbox from "./ui/Checkbox";
 import Avatar, { AvatarGroup } from "./ui/Avatar";
 import StyledName from "./StyledName";
 import { formatLong, toISO, fromISO } from "./ui/DatePicker";
+import { useBrand } from "./BrandProvider";
+import WeekdayPicker from "./ui/WeekdayPicker";
 
 type Props = {
   anchor: DOMRect | null;
@@ -22,7 +24,7 @@ type Props = {
     comment: string;
     slot: BookingSlot;
     attendeeIds: string[];
-    range?: { from: string; to: string; skipWeekends: boolean };
+    range?: { from: string; to: string; skipWeekends: boolean; weekdays?: number[] };
     /** Nur für Konferenztische: Uhrzeitfenster statt Halbtags-Slot. */
     startTime?: string;
     endTime?: string;
@@ -39,7 +41,7 @@ const addDays = (iso: string, n: number) => {
   return toISO(d);
 };
 
-const SLOT_LABEL: Record<BookingSlot, string> = {
+export const SLOT_LABEL: Record<BookingSlot, string> = {
   full: "Ganztags",
   morning: "Vormittag",
   afternoon: "Nachmittag",
@@ -59,11 +61,14 @@ export default function BookingPopover({
   const [multiDay, setMultiDay] = useState(false);
   const [range, setRange] = useState({ from: date, to: addDays(date, 4) });
   const [skipWeekends, setSkipWeekends] = useState(true);
+  const [recurring, setRecurring] = useState(false);
+  const [weekdays, setWeekdays] = useState<number[]>([fromISO(date).getDay() === 0 ? 6 : fromISO(date).getDay() - 1]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Nur fuer Konferenztische (Kapazitaet > 1) relevant: zusaetzliche Teilnehmer
   const isMeetingTable = (desk?.capacity ?? 1) > 1;
+  const { max_meeting_hours: maxMeetingHours } = useBrand();
   const [attendeeIds, setAttendeeIds] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [directory, setDirectory] = useState<{ id: string; full_name: string }[]>([]);
@@ -74,6 +79,12 @@ export default function BookingPopover({
   const timeOverlaps = isMeetingTable && timeBookings.some(
     (b) => !!b.start_time && !!b.end_time && b.start_time < timeRange.end && b.end_time > timeRange.start
   );
+  const timeDurationH = (() => {
+    const [sh, sm] = timeRange.start.split(":").map(Number);
+    const [eh, em] = timeRange.end.split(":").map(Number);
+    return (eh * 60 + em - sh * 60 - sm) / 60;
+  })();
+  const timeTooLong = isMeetingTable && maxMeetingHours > 0 && timeDurationH > maxMeetingHours;
 
   const loadDirectory = useCallback(() => {
     if (directoryLoaded) return;
@@ -274,6 +285,14 @@ export default function BookingPopover({
                 {timeOverlaps && (
                   <p className="mt-1.5 text-[11px] text-danger">In diesem Zeitraum ist der Tisch schon belegt.</p>
                 )}
+                {timeTooLong && (
+                  <p className="mt-1.5 text-[11px] text-danger">
+                    Konferenztische sind auf maximal {maxMeetingHours} Stunden am Stück begrenzt.
+                  </p>
+                )}
+                {!timeOverlaps && !timeTooLong && maxMeetingHours > 0 && (
+                  <p className="mt-1.5 text-[11px] text-muted">Maximal {maxMeetingHours} Stunden am Stück.</p>
+                )}
               </div>
 
               <div>
@@ -382,7 +401,7 @@ export default function BookingPopover({
               <Checkbox
                 id="bk-multiday"
                 checked={multiDay}
-                onChange={setMultiDay}
+                onChange={(v) => { setMultiDay(v); if (!v) setRecurring(false); }}
                 label="Mehrere Tage"
                 hint="Belegte Tage werden übersprungen"
               />
@@ -403,8 +422,18 @@ export default function BookingPopover({
                              className="w-full rounded-md border border-line bg-raised px-2 py-1.5 text-xs focus-ring" />
                     </label>
                   </div>
-                  <Checkbox id="bk-skip-we" checked={skipWeekends} onChange={setSkipWeekends}
-                            label="Wochenenden auslassen" />
+                  <Checkbox id="bk-recurring" checked={recurring} onChange={setRecurring}
+                            label="Wiederkehrend an bestimmten Wochentagen"
+                            hint="z. B. jeden Montag – statt an jedem Tag im Zeitraum" />
+                  {recurring ? (
+                    <WeekdayPicker
+                      value={weekdays} onChange={setWeekdays}
+                      activeTitle="An diesem Wochentag buchen" inactiveTitle="An diesem Wochentag nicht buchen"
+                    />
+                  ) : (
+                    <Checkbox id="bk-skip-we" checked={skipWeekends} onChange={setSkipWeekends}
+                              label="Wochenenden auslassen" />
+                  )}
                 </div>
               )}
 
@@ -442,7 +471,7 @@ export default function BookingPopover({
               className="w-full border !border-accent/50 !bg-transparent font-medium text-accent
                          transition-colors duration-300 hover:!bg-accent hover:!text-accent-ink"
               loading={busy}
-              disabled={timeOverlaps || timeRange.end <= timeRange.start}
+              disabled={timeOverlaps || timeTooLong || timeRange.end <= timeRange.start}
               onClick={() => run(() => onBook({
                 comment, slot: "full", attendeeIds,
                 startTime: timeRange.start, endTime: timeRange.end,
@@ -459,14 +488,17 @@ export default function BookingPopover({
               className="w-full border !border-accent/50 !bg-transparent font-medium text-accent
                          transition-colors duration-300 hover:!bg-accent hover:!text-accent-ink"
               loading={busy}
+              disabled={multiDay && recurring && weekdays.length === 0}
               onClick={() => run(() => onBook({
                 comment,
                 slot,
                 attendeeIds,
-                range: multiDay ? { ...range, skipWeekends } : undefined,
+                range: multiDay
+                  ? { ...range, skipWeekends, weekdays: recurring ? weekdays : undefined }
+                  : undefined,
               }))}
             >
-              {multiDay ? "Zeitraum buchen" : `${SLOT_LABEL[slot]} buchen`}
+              {multiDay ? (recurring ? "Wiederkehrend buchen" : "Zeitraum buchen") : `${SLOT_LABEL[slot]} buchen`}
             </Button>
           </CardFooter>
         )}

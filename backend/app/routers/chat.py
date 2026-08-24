@@ -15,8 +15,28 @@ from ..database import get_db
 from ..deps import get_current_user, verify_csrf, require_admin
 from ..models import Message, User
 from ..schemas import MessageCreate, MessageOut, ConversationOut, DirectoryUser
+from ..config import settings as app_settings
+from ..email_utils import is_email_configured, send_notification_email
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+async def _maybe_notify_email(db: AsyncSession, recipient: User, subject: str, body: str) -> None:
+    """E-Mail nur, wenn: SMTP konfiguriert, die Person das nicht abgeschaltet
+    hat, sie gerade NICHT in der App aktiv ist (siehe User.online) und der
+    Cooldown seit der letzten Benachrichtigung abgelaufen ist. Best-effort -
+    ein Fehlschlag hier darf das Senden der eigentlichen Nachricht nie stören."""
+    if not is_email_configured() or not recipient.email or recipient.online:
+        return
+    if recipient.last_email_notified_at:
+        ref = recipient.last_email_notified_at
+        now = datetime.now(ref.tzinfo) if ref.tzinfo else datetime.now(timezone.utc)
+        if (now - ref).total_seconds() < app_settings.EMAIL_NOTIFY_COOLDOWN_MINUTES * 60:
+            return
+    sent = await send_notification_email(recipient.email, subject, body)
+    if sent:
+        recipient.last_email_notified_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 def _mentions_csv(ids: list[str]) -> str:
@@ -80,6 +100,20 @@ async def send_global(payload: MessageCreate, user: User = Depends(get_current_u
     db.add(msg)
     await db.commit()
     await db.refresh(msg, attribute_names=["sender"])
+
+    if mentioned:
+        preview = payload.body.strip()
+        preview = preview if len(preview) <= 200 else f"{preview[:200]}…"
+        rows = await db.scalars(select(User).where(User.id.in_(mentioned)))
+        for target in rows.all():
+            if target.id != user.id and target.notify_email_mention:
+                await _maybe_notify_email(
+                    db, target,
+                    subject=f"{user.full_name} hat dich im Team-Chat erwähnt",
+                    body=f"{user.full_name} hat dich im globalen Chat erwähnt:\n\n{preview}\n\n"
+                         f"Öffnen: {app_settings.PUBLIC_URL}/dashboard",
+                )
+
     return _to_out(msg)
 
 
@@ -146,7 +180,7 @@ async def list_conversations(user: User = Depends(get_current_user), db: AsyncSe
             seen[other.id] = ConversationOut(
                 user_id=other.id, user_name=other.full_name,
                 user_name_style=other.name_style, user_name_style_color=other.name_style_color,
-                user_avatar_url=other.avatar_url, user_online=other.online,
+                user_avatar_url=other.avatar_url, user_online=other.online, user_last_seen_at=other.last_seen_at,
                 last_message=m.body, last_at=m.created_at, unread=0,
             )
     for conv in seen.values():
@@ -207,6 +241,15 @@ async def send_dm(other_id: str, payload: MessageCreate, request: Request,
     db.add(msg)
     await db.commit()
     await db.refresh(msg, attribute_names=["sender"])
+    if other.notify_email_dm:
+        preview = payload.body.strip()
+        preview = preview if len(preview) <= 200 else f"{preview[:200]}…"
+        await _maybe_notify_email(
+            db, other,
+            subject=f"Neue Nachricht von {user.full_name}",
+            body=f"{user.full_name} hat dir geschrieben:\n\n{preview}\n\n"
+                 f"Antworten: {app_settings.PUBLIC_URL}/chat?with={user.id}",
+        )
     return _to_out(msg)
 
 

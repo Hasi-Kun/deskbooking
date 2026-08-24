@@ -89,6 +89,7 @@ export default function SettingsMenu({ isAdmin }: { isAdmin: boolean }) {
           gradient_to: draft.gradient_to,
           gradient_enabled: draft.gradient_enabled,
           ambient_color: draft.ambient_color,
+          max_meeting_hours: draft.max_meeting_hours,
         }),
       });
       await refreshBrand();
@@ -186,6 +187,25 @@ export default function SettingsMenu({ isAdmin }: { isAdmin: boolean }) {
                     value={draft.ambient_color}
                     onChange={(hex) => preview({ ambient_color: hex })}
                   />
+
+                  <div className="space-y-1.5 border-t border-line pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Buchungsregeln</p>
+                  </div>
+                  <label className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-ink">Max. Dauer je Konferenztisch-Buchung</span>
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="number" min={0} max={24} value={draft.max_meeting_hours}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isNaN(v)) preview({ max_meeting_hours: Math.max(0, Math.min(24, v)) });
+                        }}
+                        className="h-8 w-16 rounded-md border border-line bg-raised text-center text-sm tabular-nums focus-ring"
+                      />
+                      <span className="text-xs text-muted">Std.</span>
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-muted">0 = kein Limit.</p>
 
                   {error && (
                     <p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">

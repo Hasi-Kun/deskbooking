@@ -28,17 +28,29 @@ type Props = {
   /** Online-Status im Chat (grün/grau, wie bei Discord) - unabhängig vom
    *  Buchungs-"badge" oben, da beide nie gleichzeitig gebraucht werden. */
   online?: boolean;
+  /** Für den Hover-Titel des Online-Punkts, wenn "online" false ist - zeigt
+   *  z.B. "Zuletzt online vor 12 Min." statt nur "Offline". */
+  lastSeenAt?: string | null;
   /** Ring in Hintergrundfarbe - für überlappende Gruppen. */
   ring?: boolean;
   title?: string;
 };
+
+function lastSeenLabel(iso?: string | null): string {
+  if (!iso) return "Offline";
+  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return "Zuletzt online: gerade eben";
+  if (diffMin < 60) return `Zuletzt online: vor ${diffMin} Min.`;
+  if (diffMin < 60 * 24) return `Zuletzt online: vor ${Math.round(diffMin / 60)} Std.`;
+  return `Zuletzt online: vor ${Math.round(diffMin / (60 * 24))} Tagen`;
+}
 
 /**
  * Rundes Kürzel-Bild. Ohne Profilbild wird ein farbiges Monogramm erzeugt,
  * dessen Farbton aus dem Namen abgeleitet ist. Der Statuspunkt sitzt unten
  * rechts.
  */
-export default function Avatar({ name, src, size = 32, badge = "none", online, ring, title }: Props) {
+export default function Avatar({ name, src, size = 32, badge = "none", online, lastSeenAt, ring, title }: Props) {
   const hue = hueFor(name);
   const dot = Math.max(8, Math.round(size * 0.3));
 
@@ -73,8 +85,8 @@ export default function Avatar({ name, src, size = 32, badge = "none", online, r
 
       {online !== undefined ? (
         <span
-          title={online ? "Online" : "Offline"}
-          aria-label={online ? "Online" : "Offline"}
+          title={online ? "Online" : lastSeenLabel(lastSeenAt)}
+          aria-label={online ? "Online" : lastSeenLabel(lastSeenAt)}
           className={[
             "absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-surface",
             online ? "bg-free" : "bg-muted/50",

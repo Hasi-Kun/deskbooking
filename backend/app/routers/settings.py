@@ -8,6 +8,7 @@ from ..config import settings
 from ..models import AppSetting, User
 from ..schemas import PublicConfig, AppearanceUpdate
 from ..deps import require_admin, verify_csrf
+from ..email_utils import is_email_configured
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -25,10 +26,12 @@ DEFAULTS = {
     "ambient_color": lambda: settings.AMBIENT_COLOR,
     "logo_url": lambda: settings.LOGO_URL,
     "support_contact": lambda: settings.SUPPORT_CONTACT,
+    "max_meeting_hours": lambda: str(settings.MAX_MEETING_HOURS),
 }
 
 COLOR_KEYS = {"primary_color", "gradient_from", "gradient_mid", "gradient_to", "ambient_color"}
 BOOL_KEYS = {"gradient_enabled"}
+INT_KEYS = {"max_meeting_hours"}
 
 
 async def load_appearance(db: AsyncSession) -> dict[str, object]:
@@ -41,8 +44,19 @@ async def load_appearance(db: AsyncSession) -> dict[str, object]:
         # Leerer String ist bei optionalen Feldern (gradient_mid, logo_url) ein
         # gueltiger Wert - deshalb "is not None" statt Truthiness.
         raw = value if value is not None else (default() or "")
-        # In der Tabelle stehen nur Strings; Schalter wieder zu bool wandeln.
-        out[key] = (raw == "1") if key in BOOL_KEYS else raw
+        # In der Tabelle stehen nur Strings; Schalter/Zahl wieder zurueckwandeln.
+        if key in BOOL_KEYS:
+            out[key] = raw == "1"
+        elif key in INT_KEYS:
+            try:
+                out[key] = int(raw)
+            except ValueError:
+                out[key] = 0
+        else:
+            out[key] = raw
+    # Nicht in AppSetting gespeichert, nur ein Hinweis fuers Frontend, ob die
+    # E-Mail-Benachrichtigungs-Umschalter ueberhaupt etwas bewirken.
+    out["email_configured"] = is_email_configured()
     return out
 
 

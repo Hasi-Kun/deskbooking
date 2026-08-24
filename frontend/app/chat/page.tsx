@@ -78,6 +78,16 @@ function ChatPageInner() {
     [directory, conversations]
   );
 
+  const [query, setQuery] = useState("");
+  const filteredConversations = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? conversations.filter((c) => c.user_name.toLowerCase().includes(q)) : conversations;
+  }, [conversations, query]);
+  const filteredDirectoryOnly = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? directoryOnly.filter((d) => d.full_name.toLowerCase().includes(q)) : directoryOnly;
+  }, [directoryOnly, query]);
+
   const active = conversations.find((c) => c.user_id === activeId)
     ?? (activeId ? directory.find((d) => d.id === activeId) : undefined);
 
@@ -99,32 +109,47 @@ function ChatPageInner() {
       <div className="mt-4 flex h-[600px] overflow-hidden rounded-2xl border border-line bg-surface">
         {/* Konversationsliste */}
         <div className={[
-          "w-full shrink-0 border-r border-line md:block md:w-72",
-          showList ? "block" : "hidden",
+          "flex w-full shrink-0 flex-col border-r border-line md:flex md:w-72",
+          showList ? "flex" : "hidden",
         ].join(" ")}>
-          <div className="thin-scroll h-full overflow-y-auto">
+          {(conversations.length + directoryOnly.length) > 6 && (
+            <div className="relative shrink-0 border-b border-line p-2">
+              <SearchIcon />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Person suchen…"
+                className="w-full rounded-lg border border-line bg-raised py-1.5 pl-8 pr-3 text-xs
+                           placeholder:text-muted/60 focus-ring"
+              />
+            </div>
+          )}
+          <div className="thin-scroll flex-1 overflow-y-auto">
             {conversations.length === 0 && directoryOnly.length === 0 && (
               <p className="p-4 text-center text-xs text-muted">Noch keine Kolleg:innen verfügbar.</p>
             )}
-            {conversations.map((c) => (
+            {query && filteredConversations.length === 0 && filteredDirectoryOnly.length === 0 && (
+              <p className="p-4 text-center text-xs text-muted">Keine Treffer für „{query}“.</p>
+            )}
+            {filteredConversations.map((c) => (
               <ConvRow
                 key={c.user_id} active={c.user_id === activeId}
                 name={c.user_name} style={c.user_name_style} color={c.user_name_style_color}
-                avatar={c.user_avatar_url} online={c.user_online}
+                avatar={c.user_avatar_url} online={c.user_online} lastSeenAt={c.user_last_seen_at}
                 sub={c.last_message} time={timeAgo(c.last_at)} unread={c.unread}
                 onClick={() => { setActiveId(c.user_id); setShowList(false); }}
               />
             ))}
-            {directoryOnly.length > 0 && (
+            {filteredDirectoryOnly.length > 0 && (
               <p className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Neue Nachricht an
               </p>
             )}
-            {directoryOnly.map((d) => (
+            {filteredDirectoryOnly.map((d) => (
               <ConvRow
                 key={d.id} active={d.id === activeId}
                 name={d.full_name} style={d.name_style} color={d.name_style_color}
-                avatar={d.avatar_url} online={d.online} sub="Noch kein Verlauf"
+                avatar={d.avatar_url} online={d.online} lastSeenAt={d.last_seen_at} sub="Noch kein Verlauf"
                 onClick={() => { setActiveId(d.id); setShowList(false); }}
               />
             ))}
@@ -155,10 +180,10 @@ function ChatPageInner() {
 }
 
 function ConvRow({
-  active, name, style, color, avatar, online, sub, time, unread, onClick,
+  active, name, style, color, avatar, online, lastSeenAt, sub, time, unread, onClick,
 }: {
   active: boolean; name: string; style?: string; color?: string; avatar?: string | null; online?: boolean;
-  sub: string; time?: string; unread?: number; onClick: () => void;
+  lastSeenAt?: string | null; sub: string; time?: string; unread?: number; onClick: () => void;
 }) {
   return (
     <button
@@ -168,7 +193,7 @@ function ConvRow({
         active ? "bg-raised" : "hover:bg-raised/60",
       ].join(" ")}
     >
-      <Avatar name={name} src={avatar} size={36} online={online} />
+      <Avatar name={name} src={avatar} size={36} online={online} lastSeenAt={lastSeenAt} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium text-ink">
@@ -276,7 +301,7 @@ function Thread({
           return (
             <div key={m.id} className={`flex gap-2 ${isMine ? "flex-row-reverse" : ""}`}>
               <Avatar name={m.sender_name} src={m.sender_avatar_url} size={24} online={m.sender_online} />
-              <div className={`max-w-[75%] ${isMine ? "items-end" : ""} flex flex-col`}>
+              <div className={`max-w-[75%] flex flex-col ${isMine ? "items-end" : "items-start"}`}>
                 <span className="mb-0.5 flex items-baseline gap-1.5 px-1 text-[10px] text-muted">
                   <span>{isMine ? "Du" : otherName}</span>
                   <span className="text-muted/70">{timeShort(m.created_at)}</span>
@@ -320,6 +345,17 @@ function Thread({
         </div>
       </div>
     </>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-muted">
+      <circle cx="11" cy="11" r="8" />
+      <path d="M21 21l-4.35-4.35" />
+    </svg>
   );
 }
 

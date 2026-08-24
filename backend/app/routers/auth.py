@@ -14,6 +14,7 @@ from ..schemas import (
     TotpSetupResponse, TotpVerifyRequest, TotpDisableRequest, BackupCodesResponse,
     NameStyleUpdate,
     MineColorUpdate,
+    NotificationSettingsUpdate,
 )
 from ..security import (
     verify_password, hash_password, create_access_token,
@@ -309,6 +310,19 @@ async def set_mine_color(payload: MineColorUpdate, user: User = Depends(get_curr
     einer frei wählbaren eigenen Farbe - rein kosmetisch, pro Person."""
     user.mine_uses_accent = payload.mine_uses_accent
     user.mine_color = payload.mine_color
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.put("/notifications", response_model=UserOut, dependencies=[Depends(verify_csrf)])
+async def set_notification_settings(payload: NotificationSettingsUpdate, user: User = Depends(get_current_user),
+                                     db: AsyncSession = Depends(get_db)):
+    """Opt-out für E-Mail-Benachrichtigungen bei neuer Direktnachricht/
+    Erwähnung (siehe email_utils.py) - wirkt nur, wenn der Server überhaupt
+    SMTP konfiguriert hat, schadet als Einstellung aber auch sonst nicht."""
+    user.notify_email_dm = payload.notify_email_dm
+    user.notify_email_mention = payload.notify_email_mention
     await db.commit()
     await db.refresh(user)
     return user

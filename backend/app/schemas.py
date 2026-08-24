@@ -33,11 +33,18 @@ class UserOut(BaseModel):
     avatar_url: str | None = None
     mine_uses_accent: bool = False
     mine_color: str = "#3B82F6"
+    notify_email_dm: bool = True
+    notify_email_mention: bool = True
 
 
 class MineColorUpdate(BaseModel):
     mine_uses_accent: bool
     mine_color: str = Field(default="#3B82F6", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class NotificationSettingsUpdate(BaseModel):
+    notify_email_dm: bool
+    notify_email_mention: bool
 
 
 class UserCreate(BaseModel):
@@ -141,6 +148,10 @@ class BookingRangeCreate(BaseModel):
     comment: str = Field(default="", max_length=280)
     attendee_ids: list[str] = Field(default_factory=list, max_length=29)
     skip_weekends: bool = True
+    # Wiederkehrend "nur montags" o.ae.: nur diese Wochentage im Zeitraum
+    # buchen (Montag=0...Sonntag=6). None/leer = jeden Tag im Zeitraum
+    # (bisheriges Verhalten, ggf. abzueglich Wochenenden ueber skip_weekends).
+    weekdays: list[int] | None = None
 
 
 class AttendeeOut(BaseModel):
@@ -185,6 +196,8 @@ class PublicConfig(BaseModel):
     ambient_color: str
     logo_url: str
     support_contact: str
+    max_meeting_hours: int
+    email_configured: bool
 
 
 # ---------- Scene objects (Waende, Tueren, Pflanzen ...) ----------
@@ -275,6 +288,7 @@ class AppearanceUpdate(BaseModel):
     gradient_to: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     gradient_enabled: bool | None = None
     ambient_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    max_meeting_hours: int | None = Field(default=None, ge=0, le=24)
 
 
 class BackupCodesResponse(BaseModel):
@@ -347,6 +361,7 @@ class ConversationOut(BaseModel):
     user_name_style_color: str = "#35E0C0"
     user_avatar_url: str | None = None
     user_online: bool = False
+    user_last_seen_at: datetime | None = None
     last_message: str
     last_at: datetime
     unread: int
@@ -361,6 +376,7 @@ class DirectoryUser(BaseModel):
     name_style_color: str = "#35E0C0"
     avatar_url: str | None = None
     online: bool = False
+    last_seen_at: datetime | None = None
 
 
 # ---------- Aktivitäten-Log (Admin) ----------
@@ -374,6 +390,7 @@ class AuditLogOut(BaseModel):
     timestamp: datetime
     user_id: str | None = None
     user_name: str | None = None   # None, wenn das Konto seither gelöscht wurde
+    user_avatar_url: str | None = None
 
 
 # ---------- Urlaub / Abwesenheit ----------

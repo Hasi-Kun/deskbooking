@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/admin/audit-log", tags=["admin"])
 
 @router.get("", response_model=list[AuditLogOut])
 async def list_audit_log(
-    limit: int = Query(default=60, le=200),
+    limit: int = Query(default=60, le=1000),
     before: datetime | None = Query(default=None, description="Nur Einträge VOR diesem Zeitpunkt (Pagination)"),
     admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
 ):
@@ -34,6 +34,7 @@ async def list_audit_log(
             id=a.id, action=a.action, entity=a.entity, entity_id=a.entity_id,
             ip_address=a.ip_address, timestamp=a.timestamp,
             user_id=a.user_id, user_name=a.user.full_name if a.user else None,
+            user_avatar_url=a.user.avatar_url if a.user else None,
         )
         for a in rows
     ]

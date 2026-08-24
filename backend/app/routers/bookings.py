@@ -6,9 +6,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import Booking, Desk, User, BookingStatus, BookingSlot, BookingAttendee, AuditLog, Absence
+from ..models import Booking, Desk, User, BookingStatus, BookingSlot, BookingAttendee, AuditLog, Absence, AppSetting
 from ..schemas import BookingCreate, BookingOut, BookingRangeCreate, AttendeeOut
 from ..deps import get_current_user, verify_csrf
+from ..config import settings as app_settings
+
+
+async def _max_meeting_hours(db: AsyncSession) -> int:
+    """Soft-Limit fuer Konferenztisch-Buchungen - in den Admin-Einstellungen
+    zur Laufzeit aenderbar (AppSetting schlaegt .env-Vorgabe), 0 = kein Limit."""
+    row = await db.get(AppSetting, "max_meeting_hours")
+    if row is not None:
+        try:
+            return int(row.value)
+        except ValueError:
+            pass
+    return app_settings.MAX_MEETING_HOURS
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
@@ -163,6 +176,15 @@ async def create_booking(payload: BookingCreate, request: Request,
         if end_t <= start_t:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Endzeit muss nach der Startzeit liegen")
 
+        max_hours = await _max_meeting_hours(db)
+        if max_hours > 0:
+            duration_h = (end_t.hour * 60 + end_t.minute - start_t.hour * 60 - start_t.minute) / 60
+            if duration_h > max_hours:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Konferenztische sind auf maximal {max_hours} Stunden am Stück begrenzt",
+                )
+
         overlap = await db.scalar(
             select(Booking).where(
                 Booking.desk_id == desk.id,
@@ -250,7 +272,9 @@ async def create_booking(payload: BookingCreate, request: Request,
         await db.commit()
 
     await db.refresh(booking, attribute_names=["desk", "user", "attendees"])
-    db.add(AuditLog(user_id=user.id, action="booking_create", entity="booking", entity_id=booking.id,
+    when = booking.start_time and f"{booking.booking_date} {booking.start_time.strftime('%H:%M')}–{booking.end_time.strftime('%H:%M')}" \
+        or f"{booking.booking_date} ({SLOT_LABEL[booking.slot]})"
+    db.add(AuditLog(user_id=user.id, action=f"booking_create:{booking.desk.name} am {when}", entity="booking", entity_id=booking.id,
                      ip_address=request.client.host if request.client else ""))
     await db.commit()
     return _to_out(booking)
@@ -259,15 +283,21 @@ async def create_booking(payload: BookingCreate, request: Request,
 @router.delete("/{booking_id}", dependencies=[Depends(verify_csrf)])
 async def cancel_booking(booking_id: str, request: Request,
                           user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    booking = await db.get(Booking, booking_id)
+    booking = await db.get(Booking, booking_id, options=[selectinload(Booking.desk)])
     if not booking:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Buchung nicht gefunden")
     if booking.user_id != user.id and user.role.value != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Nur eigene Buchungen können storniert werden")
 
+    # Angaben VOR dem Löschen sichern - danach ist die Zeile weg und laesst
+    # sich nicht mehr nachladen.
+    when = booking.start_time and f"{booking.booking_date} {booking.start_time.strftime('%H:%M')}–{booking.end_time.strftime('%H:%M')}" \
+        or f"{booking.booking_date} ({SLOT_LABEL[booking.slot]})"
+    desk_name = booking.desk.name
+
     await db.delete(booking)
     await db.commit()
-    db.add(AuditLog(user_id=user.id, action="booking_cancel", entity="booking", entity_id=booking_id,
+    db.add(AuditLog(user_id=user.id, action=f"booking_cancel:{desk_name} am {when}", entity="booking", entity_id=booking_id,
                      ip_address=request.client.host if request.client else ""))
     await db.commit()
     return {"ok": True}
@@ -282,8 +312,8 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
     im Ergebnis gemeldet - so scheitert nicht die ganze Aktion an einem Tag."""
     if payload.date_to < payload.date_from:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Enddatum liegt vor dem Startdatum")
-    if (payload.date_to - payload.date_from).days > 92:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Zeitraum ist auf 92 Tage begrenzt")
+    if (payload.date_to - payload.date_from).days > 180:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Zeitraum ist auf 180 Tage begrenzt")
 
     desk = await db.get(Desk, payload.desk_id)
     if not desk or not desk.is_active:
@@ -306,6 +336,13 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
     while current <= payload.date_to:
         # Wochenenden optional ueberspringen (Mo=0 ... So=6)
         if current < today or (payload.skip_weekends and current.weekday() >= 5):
+            current += timedelta(days=1)
+            continue
+
+        # Wiederkehrend an bestimmten Wochentagen (z.B. "nur montags") - alle
+        # anderen Tage im Zeitraum werden ausgelassen, ohne als "belegt"
+        # gemeldet zu werden (sie waren schlicht nicht gewollt).
+        if payload.weekdays and current.weekday() not in payload.weekdays:
             current += timedelta(days=1)
             continue
 
@@ -343,7 +380,7 @@ async def create_booking_range(payload: BookingRangeCreate, request: Request,
                 skipped.append(current.isoformat())
         current += timedelta(days=1)
 
-    db.add(AuditLog(user_id=user.id, action="booking_create_range", entity="booking",
+    db.add(AuditLog(user_id=user.id, action=f"booking_create_range:{desk.name} ({len(created)} Tage ab {payload.date_from})", entity="booking",
                      entity_id=desk.id, ip_address=request.client.host if request.client else ""))
     await db.commit()
     return {"created": created, "skipped": skipped}

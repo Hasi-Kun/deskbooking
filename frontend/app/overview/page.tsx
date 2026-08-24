@@ -31,6 +31,35 @@ const stepWorkday = (iso: string, dir: 1 | -1) => {
 
 type Span = 14 | 30 | 60;
 
+function csvEscape(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** CSV-Export der Matrix - eine Zeile pro Platz, eine Spalte pro Tag,
+ *  Zelleninhalt: wer dort sitzt (oder "frei"/"fest"). Fürs Facility-
+ *  Management als Auslastungs-Report weiterverwendbar. */
+function exportMatrixCsv(desks: Desk[], days: string[], byDeskDay: Map<string, Booking>) {
+  const header = ["Platz", ...days];
+  const rows = desks.map((desk) => [
+    desk.name,
+    ...days.map((d) => {
+      if (desk.fixed_user_id) return `fest (${desk.fixed_user_name ?? ""})`;
+      const b = byDeskDay.get(`${desk.id}|${d}`);
+      if (!b) return "frei";
+      const when = b.start_time && b.end_time ? ` ${b.start_time}-${b.end_time}` : ` ${b.slot}`;
+      return `${b.user_name}${when}`;
+    }),
+  ]);
+  const csv = [header, ...rows].map((r) => r.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `belegung_${days[0]}_bis_${days[days.length - 1]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function OverviewPage() {
   const router = useRouter();
   const { data, ensure } = useAppData();
@@ -153,6 +182,14 @@ export default function OverviewPage() {
             <p className="mt-0.5 text-sm text-muted">
               Alle Plätze über {span} Tage – eine Zeile pro Tisch
             </p>
+            {view === "matrix" && (
+              <button
+                onClick={() => exportMatrixCsv(active, days, byDeskDay)}
+                className="mt-1.5 text-xs text-muted underline decoration-dotted underline-offset-2 hover:text-ink focus-ring rounded"
+              >
+                Als CSV exportieren
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {floors.length > 1 && floors.map((f) => (

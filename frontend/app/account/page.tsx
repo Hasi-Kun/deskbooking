@@ -10,6 +10,7 @@ import Dialog from "../components/ui/Dialog";
 import AlertDialog from "../components/ui/AlertDialog";
 import ColorPicker from "../components/ui/ColorPicker";
 import Switch from "../components/ui/Switch";
+import { useBrand } from "../components/BrandProvider";
 import StyledName from "../components/StyledName";
 import Avatar from "../components/ui/Avatar";
 import { isWebAuthnSupported, createPasskey } from "@/lib/webauthn";
@@ -21,6 +22,7 @@ type Status = User & { is_active: boolean; totp_enabled: boolean; backup_codes_r
 export default function AccountPage() {
   const router = useRouter();
   const { data } = useAppData();
+  const brand = useBrand();
   // Aus dem Cache vorbefüllen (nur für Name/Rolle, die AppShell fürs Menü
   // braucht) - die restlichen Felder (2FA-Status etc.) kommen gleich darauf
   // über den eigenen /api/auth/status-Aufruf und überschreiben diesen Platzhalter.
@@ -170,6 +172,15 @@ export default function AccountPage() {
         method: "PUT", body: JSON.stringify({ mine_uses_accent: useAccent, mine_color: color }),
       });
     } catch (e) { /* stumm - rein kosmetisch, kein Blocker */ }
+  }
+
+  async function saveNotifications(dm: boolean, mention: boolean) {
+    setStatus((s) => (s ? { ...s, notify_email_dm: dm, notify_email_mention: mention } : s));
+    try {
+      await api("/api/auth/notifications", {
+        method: "PUT", body: JSON.stringify({ notify_email_dm: dm, notify_email_mention: mention }),
+      });
+    } catch (e) { /* stumm */ }
   }
 
   async function act(fn: () => Promise<void>, ok?: string) {
@@ -519,6 +530,34 @@ export default function AccountPage() {
               checked={!!status?.mine_uses_accent}
               onChange={(v) => saveMineColor(v, status?.mine_color || "#3B82F6")}
               label="Stattdessen an die Akzentfarbe binden"
+            />
+          </div>
+        </section>
+
+        {/* E-Mail-Benachrichtigungen */}
+        <section className="rounded-xl2 border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold">E-Mail-Benachrichtigungen</h2>
+          {!brand.email_configured ? (
+            <p className="mt-1 text-sm text-muted">
+              Der Server hat keinen E-Mail-Versand eingerichtet - diese Einstellungen wirken sich aktuell nicht aus.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-muted">
+              Nur wenn du gerade nicht in der App aktiv bist.
+            </p>
+          )}
+          <div className="mt-3 space-y-3">
+            <Switch
+              id="notify-dm"
+              checked={status?.notify_email_dm ?? true}
+              onChange={(v) => saveNotifications(v, status?.notify_email_mention ?? true)}
+              label="Bei neuer Direktnachricht"
+            />
+            <Switch
+              id="notify-mention"
+              checked={status?.notify_email_mention ?? true}
+              onChange={(v) => saveNotifications(status?.notify_email_dm ?? true, v)}
+              label="Bei Erwähnung im Team-Chat"
             />
           </div>
         </section>

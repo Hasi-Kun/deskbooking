@@ -92,6 +92,29 @@ class Settings(BaseSettings):
     LOGO_URL: str = ""                       # leer = Platzhalter-Icon im Frontend
     SUPPORT_CONTACT: str = ""
 
+    # Soft-Limit fuer Konferenztisch-Buchungen (Stunden). 0 = kein Limit.
+    # In der Oberflaeche (Admin-Einstellungen) zur Laufzeit aenderbar, hier
+    # nur der Ausgangswert ohne Datenbank-Eintrag.
+    MAX_MEETING_HOURS: int = 4
+
+    # --- E-Mail-Benachrichtigungen (optional) ---
+    # Komplett optional: bleibt SMTP_HOST leer, verschickt die Anwendung
+    # keine E-Mails und alles funktioniert wie bisher rein ueber die
+    # In-App-Badges. Erst mit gesetztem SMTP_HOST wird der Versand aktiv -
+    # dann bei neuer Direktnachricht/Erwaehnung, wenn die Person laengere
+    # Zeit nicht in der App aktiv war (siehe chat.py). Jede Person kann das
+    # zusaetzlich individuell abschalten (Konto-Einstellungen).
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""                      # leer = SMTP_USER wird verwendet
+    SMTP_USE_TLS: bool = True
+    # Mindestabstand zwischen zwei Benachrichtigungs-Mails an dieselbe
+    # Person - verhindert eine E-Mail pro Nachricht bei einer laengeren
+    # Unterhaltung waehrend jemand offline ist.
+    EMAIL_NOTIFY_COOLDOWN_MINUTES: int = 10
+
     @property
     def cors_origins(self) -> List[str]:
         return [self.PUBLIC_URL, f"https://{self.DOMAIN}"]

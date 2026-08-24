@@ -21,13 +21,9 @@
      einzureihen. */
   --c-occupied: 234 88 12;
   --c-danger: 220 38 38;
-  /* Fenster im Grundriss - fest & unabhängig von der Marken-Akzentfarbe
-     (vorher an --accent gebunden, änderte sich also ungewollt mit, sobald
-     die Admin-Markenfarbe geändert wurde). Ruhiger "Glas"-Blauton. */
-  --c-window: 14 165 233;
-  /* "Deine Buchung"-Standardfarbe - ebenfalls fest statt an --accent
-     gebunden (siehe Konto-Einstellung "An Akzentfarbe binden"). Dezentes
-     Blau, das in Hell- wie Dunkelmodus gut zum sonst neutralen Grundton passt. */
+  /* "Deine Buchung"-Standardfarbe - fest statt an --accent gebunden (siehe
+     Konto-Einstellung "An Akzentfarbe binden" bzw. frei wählbare Farbe).
+     Dezentes Blau, das in Hell- wie Dunkelmodus gut zum neutralen Grundton passt. */
   --c-mine: 59 130 246;
   --c-mine-ink: 255 255 255;
 
@@ -53,7 +49,6 @@
   --c-free: 132 204 22;
   --c-occupied: 251 146 60;
   --c-danger: 248 113 113;
-  --c-window: 56 189 248;
   --c-mine: 96 165 250;
   --c-mine-ink: 10 10 10;
 

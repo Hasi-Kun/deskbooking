@@ -104,6 +104,13 @@ class User(Base):
         now = datetime.now(ref.tzinfo) if ref.tzinfo else datetime.utcnow()
         return (now - ref) < timedelta(seconds=90)
 
+    # --- E-Mail-Benachrichtigungen (optional, siehe email_utils.py) ---
+    notify_email_dm: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_email_mention: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Cooldown-Zeitstempel - verhindert eine Mail pro Nachricht bei laengeren
+    # Unterhaltungen, waehrend die Person offline ist.
+    last_email_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -329,7 +336,7 @@ class AuditLog(Base):
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    action: Mapped[str] = mapped_column(String(64), nullable=False)   # login, login_failed, booking_create, ...
+    action: Mapped[str] = mapped_column(String(160), nullable=False)   # login, login_failed, booking_create:..., ...
     entity: Mapped[str] = mapped_column(String(64), default="")
     entity_id: Mapped[str] = mapped_column(String(64), default="")
     ip_address: Mapped[str] = mapped_column(String(64), default="")

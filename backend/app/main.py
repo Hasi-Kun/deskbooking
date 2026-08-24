@@ -105,6 +105,15 @@ async def _run_migrations():
         # v11: "Deine Buchung"-Farbe optional an die Marken-Akzentfarbe binden.
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS mine_uses_accent BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS mine_color VARCHAR(7) NOT NULL DEFAULT '#3B82F6'",
+        # v12: Aktivitäts-Log jetzt auch für Layout-Änderungen und mit mehr
+        # Details bei Buchungen (Platz + Datum statt nur der reinen Aktion) -
+        # dafuer laenger als die urspruenglichen kurzen "login_failed"-Werte.
+        "ALTER TABLE audit_log ALTER COLUMN action TYPE VARCHAR(160)",
+        # v13: E-Mail-Benachrichtigungen (optional) - pro Person abschaltbar,
+        # Cooldown-Zeitstempel verhindert Mail-Flut waehrend einer Unterhaltung.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_email_dm BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_email_mention BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_email_notified_at TIMESTAMPTZ",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

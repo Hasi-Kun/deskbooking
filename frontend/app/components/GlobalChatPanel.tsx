@@ -205,7 +205,7 @@ export default function GlobalChatPanel({ currentUser, onClose }: { currentUser:
           return (
             <div key={m.id} className={`group/msg flex gap-2 ${isMine ? "flex-row-reverse" : ""}`}>
               <Avatar name={m.sender_name} src={m.sender_avatar_url} size={26} online={m.sender_online} />
-              <div className={`max-w-[78%] ${isMine ? "items-end" : ""} flex flex-col`}>
+              <div className={`max-w-[78%] flex flex-col ${isMine ? "items-end" : "items-start"}`}>
                 <span className="mb-0.5 flex items-baseline gap-1.5 px-1 text-[10px] text-muted">
                   <StyledName name={isMine ? "Du" : m.sender_name} style={isMine ? undefined : m.sender_name_style}
                               color={isMine ? undefined : m.sender_name_style_color} />

@@ -5,6 +5,7 @@ import { GlowCard, CardHeader, CardBody, CardFooter } from "./ui/GlowCard";
 import { ObjectIcon, OBJECT_LABELS } from "./SceneIcons";
 import Button from "./ui/Button";
 import Checkbox from "./ui/Checkbox";
+import WeekdayPicker from "./ui/WeekdayPicker";
 
 type Props = {
   at: { x: number; y: number } | null;
@@ -89,6 +90,8 @@ export default function ElementPopover({
                   <WeekdayPicker
                     value={desk.fixed_days}
                     onChange={(days) => onEditDesk(desk.id, { fixed_days: days })}
+                    activeTitle="Büro-Tag (Platz fest zugewiesen)"
+                    inactiveTitle="Frei buchbar an diesem Tag"
                   />
                 </Field>
               )}
@@ -121,6 +124,7 @@ export default function ElementPopover({
                           onChange={(v) => onEditObject(object.id, { height: v })} />
                   <Slider label="Drehung" unit="°" value={object.rotation} min={0} max={345} step={15}
                           onChange={(v) => onEditObject(object.id, { rotation: v })} />
+                  <p className="text-[10px] text-muted">Tipp: Mausrad über dem ausgewählten Element dreht ebenfalls.</p>
                 </>
               ) : (
                 <p className="text-[11px] leading-relaxed text-muted">
@@ -154,41 +158,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-const WEEKDAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
-/** Wochentags-Auswahl für "an welchen Tagen gilt die feste Zuweisung" - z.B.
- *  Büro Mo/Di/Do, Homeoffice Mi/Fr. Tage außerhalb der Auswahl gelten als
- *  frei buchbar für alle anderen. */
-function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (days: number[]) => void }) {
-  const toggle = (day: number) => {
-    const set = new Set(value);
-    if (set.has(day)) set.delete(day); else set.add(day);
-    onChange(Array.from(set).sort());
-  };
-  return (
-    <div className="grid grid-cols-7 gap-1">
-      {WEEKDAY_LABELS.map((label, day) => {
-        const active = value.includes(day);
-        return (
-          <button
-            key={day}
-            type="button"
-            onClick={() => toggle(day)}
-            aria-pressed={active}
-            title={active ? "Büro-Tag (Platz fest zugewiesen)" : "Frei buchbar an diesem Tag"}
-            className={[
-              "rounded-md py-1.5 text-[11px] font-medium transition-colors focus-ring",
-              active ? "text-accent-ink" : "bg-raised text-muted hover:text-ink",
-            ].join(" ")}
-            style={active ? { background: "var(--accent)" } : undefined}
-          >
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function Slider({
   label, unit, value, min, max, step, onChange,

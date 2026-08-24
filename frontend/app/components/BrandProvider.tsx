@@ -12,6 +12,8 @@ const defaultConfig: PublicConfig = {
   ambient_color: "#34D399",
   logo_url: "",
   support_contact: "",
+  max_meeting_hours: 4,
+  email_configured: false,
 };
 
 const BrandContext = createContext<PublicConfig>(defaultConfig);

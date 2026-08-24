@@ -107,8 +107,10 @@ export default function LayoutBuilder() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  // Strg+S speichern, Entf löscht die Auswahl
+  // Strg+S speichern, Entf löscht die Auswahl, Pfeiltasten schieben das
+  // ausgewählte Element (Shift = größerer Schritt) - Drehen geht per Mausrad.
   useEffect(() => {
+    const ARROWS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
     const onKey = (e: KeyboardEvent) => {
       // In Eingabefeldern nicht eingreifen
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -120,6 +122,25 @@ export default function LayoutBuilder() {
       if (!typing && (e.key === "Delete" || e.key === "Backspace") && selection) {
         e.preventDefault();
         void removeSelected();
+      }
+      if (!typing && selection && ARROWS.includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 20 : 4;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        if (selection.type === "desk") {
+          const d = desks.find((x) => x.id === selection.id);
+          if (d) moveDesk(d.id, d.pos_x + dx, d.pos_y + dy);
+        } else if (selection.type === "object") {
+          const o = objects.find((x) => x.id === selection.id);
+          if (o) {
+            if (o.kind === "wall" || o.kind === "window") {
+              moveWall(o.id, o.pos_x + dx, o.pos_y + dy, (o.x2 ?? o.pos_x) + dx, (o.y2 ?? o.pos_y) + dy);
+            } else {
+              moveObject(o.id, o.pos_x + dx, o.pos_y + dy);
+            }
+          }
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -291,6 +312,16 @@ export default function LayoutBuilder() {
     markDirty();
   }
 
+  /** Mausrad über einem ausgewählten Element: um "delta" weiterdrehen,
+   *  0-345° umlaufend (gleiche 15°-Schrittweite wie der Drehungs-Regler
+   *  im Eigenschaften-Panel). */
+  function rotateObject(id: string, delta: number) {
+    const current = objects.find((o) => o.id === id);
+    if (!current) return;
+    const next = ((current.rotation + delta) % 360 + 360) % 360;
+    editObject(id, { rotation: next });
+  }
+
   function resizeFloor(width: number, height: number) {
     setFloors((p) => p.map((f) => (f.id === floorId ? { ...f, width, height } : f)));
     pending.current.floor = { ...pending.current.floor, width, height };
@@ -439,6 +470,7 @@ export default function LayoutBuilder() {
               onMoveDesk={moveDesk}
               onMoveObject={moveObject}
               onMoveWall={moveWall}
+              onRotateObject={rotateObject}
               onDropItem={handleDrop}
               onDrawWall={drawWall}
             />
